@@ -1,0 +1,33 @@
+{% load static %}
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8">
+    <title>Training Planner</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Space+Grotesk:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    >
+    {% if not vite_dev_server %}
+      {% for css_file in vite_assets.css %}
+        <link rel="stylesheet" href="{% static css_file %}">
+      {% endfor %}
+    {% endif %}
+  </head>
+  <body>
+    <div id="root"></div>
+    {% if vite_dev_server %}
+      <script type="module" src="{{ vite_dev_server }}/@vite/client"></script>
+      <script type="module" src="{{ vite_dev_server }}/src/main.jsx"></script>
+    {% else %}
+      {% if vite_assets.js %}
+        <script type="module" src="{% static vite_assets.js %}"></script>
+      {% else %}
+        <p>Frontend build not found. Run the Vite build first.</p>
+      {% endif %}
+    {% endif %}
+  </body>
+</html>

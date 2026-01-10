@@ -33,6 +33,7 @@ Focus: clear workflow, predictable rules, and minimal manual checks.
 ## Local setup (no Docker)
 Requirements:
 - Python 3.9+
+- Node.js 18+
 
 1) Create a virtualenv:
    - `python3 -m venv .venv`
@@ -41,6 +42,9 @@ Requirements:
    - `pip install -r requirements.txt -r requirements-dev.txt`
 3) Configure env:
    - `cp .env.example .env`
+4) Frontend deps:
+   - `cd frontend`
+   - `npm install`
 
 Shortcut:
 - `scripts/dev_setup.sh`
@@ -51,6 +55,11 @@ Run the app:
 - `python app/manage.py createsuperuser`
 - `python app/manage.py runserver`
 
+Frontend (dev server):
+- Set `VITE_DEV_SERVER=http://localhost:5173` in `.env`.
+- Run `npm run dev` in `frontend`.
+- Open `http://127.0.0.1:8000/`.
+
 MVP note:
 - Matching needs lat/lng on trainings and trainers. Geocoding uses Nominatim; you can still enter coordinates manually.
 
@@ -60,5 +69,6 @@ Login:
 ## Repo structure
 - `app/` - Application code (Django project will live here).
 - `docs/` - Product, architecture, and engineering docs.
+- `frontend/` - React SPA (Vite build).
 - `infra/` - Deployment and ops configuration.
 - `scripts/` - Helper scripts (seed data, local tools).

@@ -1,6 +1,6 @@
 # ADR 0001: Tech stack
 
-Status: accepted
+Status: superseded by 0002-frontend-spa
 
 ## Context
 We need a simple internal web app with fast development, low operating cost,

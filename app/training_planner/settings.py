@@ -131,6 +131,9 @@ AUTH_PASSWORD_VALIDATORS = [
 
 STATIC_URL = "static/"
 STATIC_ROOT = PROJECT_DIR / "staticfiles"
+STATICFILES_DIRS = [BASE_DIR / "static"]
+
+VITE_DEV_SERVER = os.environ.get("VITE_DEV_SERVER", "")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
