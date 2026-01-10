@@ -121,7 +121,7 @@ const TrainingDetail = () => {
         <div className="card">
           <h2>Training detail</h2>
           <p className="error">{error}</p>
-          <Link className="btn" to="/">
+          <Link className="btn" to="/trainings">
             Back to trainings
           </Link>
         </div>
@@ -223,7 +223,7 @@ const TrainingDetail = () => {
               <button className="btn" type="submit" disabled={saving}>
                 {saving ? "Saving..." : "Save changes"}
               </button>
-              <Link className="btn btn-ghost" to="/">
+              <Link className="btn btn-ghost" to="/trainings">
                 Back
               </Link>
             </div>

@@ -5,6 +5,7 @@ import json
 from datetime import date, timedelta
 from typing import Any, Optional
 
+from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404
@@ -43,6 +44,20 @@ def _parse_date(value: Optional[str]) -> Optional[date]:
         return date.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _parse_int(value: Optional[str], default: int, min_value: Optional[int] = None, max_value: Optional[int] = None) -> int:
+    if value is None or value == "":
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if min_value is not None and parsed < min_value:
+        return default
+    if max_value is not None and parsed > max_value:
+        return default
+    return parsed
 
 
 def _decimal(value):
@@ -139,9 +154,34 @@ def _serialize_recommendations(training: Training) -> dict[str, Any]:
 
 
 @ensure_csrf_cookie
-@login_required
 @require_http_methods(["GET"])
 def csrf_cookie(request: HttpRequest) -> JsonResponse:
+    return JsonResponse({"ok": True})
+
+
+@require_http_methods(["POST"])
+def login_view(request: HttpRequest) -> JsonResponse:
+    try:
+        payload = _parse_json(request)
+    except ValueError as exc:
+        return _json_error(str(exc))
+
+    username = payload.get("username")
+    password = payload.get("password")
+    if not username or not password:
+        return _json_error("Username and password are required.")
+
+    user = authenticate(request, username=username, password=password)
+    if user is None:
+        return _json_error("Invalid credentials.", status=400)
+
+    auth_login(request, user)
+    return JsonResponse({"ok": True, "user": {"id": user.id, "username": user.get_username()}})
+
+
+@require_http_methods(["POST"])
+def logout_view(request: HttpRequest) -> JsonResponse:
+    auth_logout(request)
     return JsonResponse({"ok": True})
 
 
@@ -357,8 +397,8 @@ def training_types_collection(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET"])
 def calendar_month(request: HttpRequest) -> JsonResponse:
     today = date.today()
-    year = int(request.GET.get("year", today.year))
-    month = int(request.GET.get("month", today.month))
+    year = _parse_int(request.GET.get("year"), today.year)
+    month = _parse_int(request.GET.get("month"), today.month, min_value=1, max_value=12)
     cal = calendar.Calendar(firstweekday=0)
     month_days = list(cal.itermonthdates(year, month))
     trainings = (

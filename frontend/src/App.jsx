@@ -5,7 +5,9 @@ import { ensureCsrf } from "./api/client.js";
 import Layout from "./components/Layout.jsx";
 import CalendarMonth from "./pages/CalendarMonth.jsx";
 import CalendarWeek from "./pages/CalendarWeek.jsx";
+import Login from "./pages/Login.jsx";
 import NotFound from "./pages/NotFound.jsx";
+import Overview from "./pages/Overview.jsx";
 import TrainerDetail from "./pages/TrainerDetail.jsx";
 import TrainerForm from "./pages/TrainerForm.jsx";
 import TrainersList from "./pages/TrainersList.jsx";
@@ -22,8 +24,10 @@ const App = () => {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/login" element={<Login />} />
         <Route element={<Layout />}>
-          <Route path="/" element={<TrainingsList />} />
+          <Route path="/" element={<Overview />} />
+          <Route path="/trainings" element={<TrainingsList />} />
           <Route path="/trainings/new" element={<TrainingForm mode="new" />} />
           <Route path="/trainings/:id" element={<TrainingDetail />} />
           <Route path="/trainings/:id/edit" element={<TrainingForm mode="edit" />} />

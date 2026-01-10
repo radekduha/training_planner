@@ -5,6 +5,8 @@ from . import views
 
 urlpatterns = [
     path("csrf/", views.csrf_cookie, name="api_csrf"),
+    path("login/", views.login_view, name="api_login"),
+    path("logout/", views.logout_view, name="api_logout"),
     path("meta/", views.meta, name="api_meta"),
     path("trainings/", views.trainings_collection, name="api_trainings"),
     path("trainings/<int:pk>/", views.training_detail, name="api_training_detail"),

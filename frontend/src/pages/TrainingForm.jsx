@@ -255,7 +255,7 @@ const TrainingForm = ({ mode }) => {
           <button className="btn" type="submit" disabled={saving}>
             {saving ? "Saving..." : isEdit ? "Save changes" : "Save training"}
           </button>
-          <Link className="btn btn-ghost" to={isEdit ? `/trainings/${id}` : "/"}>
+          <Link className="btn btn-ghost" to={isEdit ? `/trainings/${id}` : "/trainings"}>
             Cancel
           </Link>
         </div>

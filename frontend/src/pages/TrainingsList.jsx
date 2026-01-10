@@ -71,7 +71,7 @@ const TrainingsList = () => {
     <section className="stack">
       <PageHeader
         title="Trainings"
-        subtitle="Quick overview of scheduled trainings."
+        subtitle="Filter and review all scheduled trainings."
         actions={
           <Link className="btn btn-primary" to="/trainings/new">
             New training

@@ -135,8 +135,17 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 
 VITE_DEV_SERVER = os.environ.get("VITE_DEV_SERVER", "")
 
+CSRF_TRUSTED_ORIGINS = []
+if VITE_DEV_SERVER:
+    server = VITE_DEV_SERVER.rstrip("/")
+    parsed = urlparse(server)
+    if parsed.scheme and parsed.netloc:
+        CSRF_TRUSTED_ORIGINS.append(f"{parsed.scheme}://{parsed.netloc}")
+    else:
+        CSRF_TRUSTED_ORIGINS.append(server)
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-LOGIN_URL = "login"
-LOGIN_REDIRECT_URL = "training_list"
-LOGOUT_REDIRECT_URL = "login"
+LOGIN_URL = "/login/"
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/login/"

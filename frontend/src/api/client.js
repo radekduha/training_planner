@@ -40,9 +40,30 @@ export const requestJson = async (path, options = {}) => {
     body: payload,
     credentials: "include",
   });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(data.error || "Request failed.");
+  if (response.redirected && response.url.includes("/login")) {
+    if (typeof window !== "undefined") {
+      window.location.assign(response.url);
+      return new Promise(() => {});
+    }
+  }
+  const contentType = response.headers.get("content-type") || "";
+  const isJson = contentType.includes("application/json");
+  const data = isJson ? await response.json().catch(() => ({})) : await response.text().catch(() => "");
+  if (!response.ok || !isJson) {
+    if (!isJson && typeof data === "string" && data.includes("Login")) {
+      if (typeof window !== "undefined") {
+        window.location.assign("/login/");
+        return new Promise(() => {});
+      }
+    }
+    const detail =
+      typeof data === "string" && data
+        ? data.slice(0, 120)
+        : data && typeof data === "object"
+          ? data.error || ""
+          : "";
+    const suffix = detail ? ` ${detail}` : "";
+    const error = new Error(`Request failed (${response.status}).${suffix}`);
     error.status = response.status;
     error.payload = data;
     throw error;
