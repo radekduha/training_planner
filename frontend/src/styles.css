@@ -452,6 +452,31 @@ textarea {
   margin-bottom: 18px;
 }
 
+.detail-list.two-column {
+  grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 0;
+  align-items: stretch;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-divider {
+  height: 1px;
+  background: var(--line);
+  width: 100%;
+}
+
+.detail-list.two-column .detail-divider {
+  width: 1px;
+  height: 100%;
+  align-self: stretch;
+}
+
 .detail-list span {
   display: block;
   font-size: 12px;
@@ -463,6 +488,43 @@ textarea {
   display: block;
   font-size: 15px;
   margin-top: 4px;
+}
+
+.trainer-detail .detail-label,
+.trainer-detail .rule-label {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+}
+
+.trainer-detail .detail-list .detail-label {
+  display: block;
+}
+
+.trainer-detail .detail-value {
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--bg-ink);
+}
+
+.trainer-detail .detail-list .detail-value {
+  display: block;
+  margin-top: 4px;
+}
+
+.trainer-detail table th {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.trainer-detail .pill {
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .inline-actions {
@@ -536,6 +598,124 @@ textarea {
 .rule-list {
   margin: 0;
   padding-left: 18px;
+}
+
+.rule-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 0;
+}
+
+.rule-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 12px 0;
+}
+
+.rules-stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.rule-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rule-metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rule-value {
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--bg-ink);
+}
+
+.rule-unit {
+  margin-left: 6px;
+  font-size: 14px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fffdf8;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.status-pill.positive {
+  color: var(--accent-strong);
+  background: rgba(47, 111, 94, 0.16);
+  border-color: rgba(47, 111, 94, 0.35);
+}
+
+.status-pill.negative {
+  color: #b42318;
+  background: rgba(180, 35, 24, 0.12);
+  border-color: rgba(180, 35, 24, 0.25);
+}
+
+.weekday-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.weekday-grid.compact {
+  margin-bottom: 0;
+}
+
+.weekday-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fffdf8;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.weekday-item.active {
+  background: rgba(242, 193, 79, 0.18);
+  border-color: rgba(242, 193, 79, 0.5);
+  color: var(--ink);
+}
+
+.weekday-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--accent);
+  background: #fff;
+}
+
+.weekday-item.active .weekday-check {
+  border-color: rgba(47, 111, 94, 0.5);
+  background: rgba(47, 111, 94, 0.12);
 }
 
 .calendar {

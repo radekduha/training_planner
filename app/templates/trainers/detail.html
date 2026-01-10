@@ -3,39 +3,152 @@
 {% block title %}Trainer detail · Training Planner{% endblock %}
 
 {% block content %}
-  <div class="grid grid-2">
-    <div class="card">
-      <h2>{{ trainer.name }}</h2>
-      <div class="inline" style="margin-bottom: 12px;">
-        <a class="btn btn-outline" href="{% url 'trainer_edit' trainer.pk %}">Edit trainer</a>
+  <div class="grid grid-2 trainer-detail">
+    <div class="stack">
+      <div class="card">
+        <h2>{{ trainer.name }}</h2>
+        <div class="inline" style="margin-bottom: 12px;">
+          <a class="btn btn-outline" href="{% url 'trainer_edit' trainer.pk %}">Edit trainer</a>
+        </div>
       </div>
-      <p class="muted">{{ trainer.email|default:"—" }} · {{ trainer.phone|default:"—" }}</p>
-      <p><strong>Home:</strong> {{ trainer.home_address }}</p>
-      <p><strong>Lat/Lng:</strong> {{ trainer.home_lat|default:"—" }}, {{ trainer.home_lng|default:"—" }}</p>
-      <p><strong>Hourly rate:</strong> {{ trainer.hourly_rate|default:"—" }}</p>
-      <p><strong>Travel rate:</strong> {{ trainer.travel_rate_km|default:"—" }}</p>
-      <p><strong>Notes:</strong> {{ trainer.notes|default:"—" }}</p>
-      <p><strong>Workload this month:</strong> {{ month_workload }} trainings, {{ month_long_trips }} long trips</p>
-
-      <h3>Training types</h3>
-      {% if trainer.skills.all %}
-        {% for skill in trainer.skills.all %}
-          <span class="pill">{{ skill.training_type.name }}</span>
-        {% endfor %}
-      {% else %}
-        <p class="muted">No training types assigned.</p>
-      {% endif %}
-
-      <h3>Rules</h3>
-      {% if trainer.rules.all %}
-        <ul>
-          {% for rule in trainer.rules.all %}
-            <li>{{ rule.get_rule_type_display }}: {{ rule.rule_value.value|default:rule.rule_value }}</li>
+      <div class="card">
+        <h3>Contact</h3>
+        <div class="detail-list">
+          <div class="detail-item">
+            <span class="detail-label">Email</span>
+            <strong class="detail-value">{{ trainer.email|default:"—" }}</strong>
+          </div>
+          <div class="detail-divider" aria-hidden="true"></div>
+          <div class="detail-item">
+            <span class="detail-label">Phone</span>
+            <strong class="detail-value">{{ trainer.phone|default:"—" }}</strong>
+          </div>
+          <div class="detail-divider" aria-hidden="true"></div>
+          <div class="detail-item">
+            <span class="detail-label">Home</span>
+            <strong class="detail-value">{{ trainer.home_address|default:"—" }}</strong>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Pricing</h3>
+        <div class="detail-list two-column">
+          <div class="detail-item">
+            <span class="detail-label">Hourly rate</span>
+            <strong class="detail-value">
+              {% if trainer.hourly_rate is not None %}
+                {{ trainer.hourly_rate }} Kč
+              {% else %}
+                —
+              {% endif %}
+            </strong>
+          </div>
+          <div class="detail-divider" aria-hidden="true"></div>
+          <div class="detail-item">
+            <span class="detail-label">Travel rate</span>
+            <strong class="detail-value">
+              {% if trainer.travel_rate_km is not None %}
+                {{ trainer.travel_rate_km }} Kč / km
+              {% else %}
+                —
+              {% endif %}
+            </strong>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Notes &amp; workload</h3>
+        <div class="detail-list">
+          <div class="detail-item">
+            <span class="detail-label">Notes</span>
+            <strong class="detail-value">{{ trainer.notes|default:"—" }}</strong>
+          </div>
+          <div class="detail-divider" aria-hidden="true"></div>
+          <div class="detail-item">
+            <span class="detail-label">Workload this month</span>
+            <strong class="detail-value">
+              {{ month_workload }} trainings, {{ month_long_trips }} long trips
+            </strong>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Training types</h3>
+        {% if trainer.skills.all %}
+          {% for skill in trainer.skills.all %}
+            <span class="pill">{{ skill.training_type.name }}</span>
           {% endfor %}
-        </ul>
-      {% else %}
-        <p class="muted">No rules yet.</p>
-      {% endif %}
+        {% else %}
+          <p class="muted">No training types assigned.</p>
+        {% endif %}
+      </div>
+      <div class="card">
+        <h3>Rules</h3>
+        <div class="rules-stack">
+          <div class="rule-section">
+            <div class="rule-status">
+              <span class="detail-label">Weekend allowed</span>
+              {% if weekend_allowed is True %}
+                <span class="status-pill positive">Allowed</span>
+              {% elif weekend_allowed is False %}
+                <span class="status-pill negative">Not allowed</span>
+              {% else %}
+                <span class="status-pill">—</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="rule-divider" aria-hidden="true"></div>
+          <div class="rule-section">
+            <p class="detail-label">Preferred weekdays</p>
+            <div class="weekday-grid compact">
+              {% for day in weekday_choices %}
+                <div class="weekday-item {% if day.value in preferred_weekdays %}active{% endif %}">
+                  <span class="weekday-check" aria-hidden="true">
+                    {% if day.value in preferred_weekdays %}
+                      ✓
+                    {% endif %}
+                  </span>
+                  <span>{{ day.label }}</span>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% if rules %}
+            <div class="rule-divider" aria-hidden="true"></div>
+            {% for rule in rules %}
+              <div class="rule-section">
+                <div class="rule-metric">
+                  {% if rule.type == "max_distance_km" %}
+                    <span class="rule-label">Max distance</span>
+                    <span class="rule-value">
+                      {% if rule.value is not None %}
+                        {{ rule.value }} <span class="rule-unit">km</span>
+                      {% else %}
+                        —
+                      {% endif %}
+                    </span>
+                  {% elif rule.type == "max_long_trips_per_month" %}
+                    <span class="rule-label">Max long trips per month</span>
+                    <span class="rule-value">
+                      {% if rule.value is not None %}
+                        {{ rule.value }} <span class="rule-unit">trips</span>
+                      {% else %}
+                        —
+                      {% endif %}
+                    </span>
+                  {% else %}
+                    <span class="rule-label">{{ rule.label }}</span>
+                    <span class="rule-value">{{ rule.value|default_if_none:"—" }}</span>
+                  {% endif %}
+                </div>
+              </div>
+              {% if not forloop.last %}
+                <div class="rule-divider" aria-hidden="true"></div>
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
     </div>
     <div class="card">
       <h2>Assigned trainings</h2>

@@ -9,8 +9,8 @@ from geocoding.services import geocode_address
 from matching.services import LONG_TRIP_THRESHOLD_KM, haversine_km
 from trainings.models import Training, TrainingStatus
 
-from .forms import TrainerForm
-from .models import Trainer
+from .forms import TrainerForm, WEEKDAY_CHOICES
+from .models import Trainer, TrainerRuleType
 
 
 @login_required
@@ -45,6 +45,32 @@ def trainer_create(request):
 def trainer_detail(request, pk: int):
     trainer = get_object_or_404(Trainer, pk=pk)
     trainings = Training.objects.filter(assigned_trainer=trainer).order_by("-start_datetime")
+    weekday_choices = [
+        {"value": int(value), "label": label} for value, label in WEEKDAY_CHOICES
+    ]
+    preferred_weekdays = []
+    weekend_allowed = None
+    rules = []
+    for rule in trainer.rules.all():
+        value = rule.rule_value.get("value")
+        if rule.rule_type == TrainerRuleType.PREFERRED_WEEKDAYS:
+            if isinstance(value, list):
+                normalized = []
+                for day in value:
+                    try:
+                        day_num = int(day)
+                    except (TypeError, ValueError):
+                        continue
+                    if 0 <= day_num <= 6:
+                        normalized.append(day_num)
+                preferred_weekdays = sorted(set(normalized))
+            continue
+        if rule.rule_type == TrainerRuleType.WEEKEND_ALLOWED:
+            weekend_allowed = value
+            continue
+        rules.append(
+            {"type": rule.rule_type, "label": rule.get_rule_type_display(), "value": value}
+        )
     today = date.today()
     month_trainings = (
         Training.objects.filter(
@@ -71,6 +97,10 @@ def trainer_detail(request, pk: int):
         {
             "trainer": trainer,
             "trainings": trainings,
+            "rules": rules,
+            "weekday_choices": weekday_choices,
+            "preferred_weekdays": preferred_weekdays,
+            "weekend_allowed": weekend_allowed,
             "month_workload": month_trainings.count(),
             "month_long_trips": month_long_trips,
         },
