@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Trainers · Training Planner{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="inline" style="justify-content: space-between;">
+      <h2>Trainers</h2>
+      <a class="btn" href="{% url 'trainer_create' %}">Add trainer</a>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Contact</th>
+          <th>Hourly rate</th>
+          <th>Travel rate</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for trainer in trainers %}
+          <tr>
+            <td><a href="{% url 'trainer_detail' trainer.pk %}">{{ trainer.name }}</a></td>
+            <td>{{ trainer.email|default:"—" }}</td>
+            <td>{{ trainer.hourly_rate|default:"—" }}</td>
+            <td>{{ trainer.travel_rate_km|default:"—" }}</td>
+          </tr>
+        {% empty %}
+          <tr>
+              <td colspan="4" class="muted">No trainers yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

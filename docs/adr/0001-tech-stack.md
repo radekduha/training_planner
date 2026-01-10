@@ -7,7 +7,7 @@ We need a simple internal web app with fast development, low operating cost,
 and clear, predictable behavior for a single user.
 
 ## Decision
-Use Django 5 (Python 3.12) with server-rendered HTML and HTMX for small
+Use Django 4.2 LTS (Python 3.9+) with server-rendered HTML and HTMX for small
 interactive updates. PostgreSQL is the production database; SQLite is used for
 local development. Styling is handled by Tailwind CSS.
 

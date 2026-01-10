@@ -1,7 +1,7 @@
 # Local setup (no Docker)
 
 ## Requirements
-- Python 3.12
+- Python 3.9+
 - pip
 
 ## Setup
@@ -16,6 +16,14 @@
 Shortcut:
 - `scripts/dev_setup.sh`
 
-## Run (once Django app exists)
+## Run
+- `python app/manage.py makemigrations`
 - `python app/manage.py migrate`
+- `python app/manage.py createsuperuser`
 - `python app/manage.py runserver`
+
+## MVP note
+- Matching needs lat/lng on trainings and trainers. Geocoding uses Nominatim; you can still enter coordinates manually.
+
+## Login
+- Visit `http://127.0.0.1:8000/login/` and use the superuser credentials.

@@ -1,7 +1,7 @@
 # Tech stack
 
 ## Summary
-- Backend: Python 3.12, Django 5
+- Backend: Python 3.9+, Django 4.2 LTS
 - UI: Server-rendered HTML + HTMX (minimal JS)
 - Styling: Tailwind CSS (compiled once, no runtime JS dependency)
 - DB: PostgreSQL 16 (prod), SQLite (dev)

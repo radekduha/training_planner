@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Trainings · Training Planner{% endblock %}
+
+{% block main_class %}wide{% endblock %}
+
+{% block content %}
+  <div class="grid">
+    <div class="card">
+      <h2>Filters</h2>
+      <form method="get">
+        <div class="filters">
+          <div>
+            <label for="status">Status</label>
+            <select id="status" name="status">
+              <option value="">All</option>
+              {% for value, label in status_choices %}
+                <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>
+                  {{ label }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div>
+            <label for="training_type">Training type</label>
+            <select id="training_type" name="training_type">
+              <option value="">All</option>
+              {% for ttype in training_types %}
+                <option value="{{ ttype.id }}" {% if selected_type == ttype.id|stringformat:"s" %}selected{% endif %}>
+                  {{ ttype.name }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div>
+            <label for="start_date">Start date</label>
+            <input id="start_date" name="start_date" type="date" value="{{ selected_start_date }}">
+          </div>
+
+          <div>
+            <label for="end_date">End date</label>
+            <input id="end_date" name="end_date" type="date" value="{{ selected_end_date }}">
+          </div>
+
+          <div class="actions">
+            <button class="btn" type="submit">Apply</button>
+            <a class="btn btn-outline" href="{% url 'training_list' %}">Reset</a>
+          </div>
+        </div>
+
+        <label class="checkbox-row">
+          <input type="checkbox" name="no_trainer" value="1" {% if selected_no_trainer %}checked{% endif %}>
+          Without trainer (draft + waiting)
+        </label>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="inline" style="justify-content: space-between;">
+        <div>
+          <h2>Trainings</h2>
+          <p class="muted">Quick overview of scheduled trainings.</p>
+        </div>
+        <a class="btn" href="{% url 'training_create' %}">New training</a>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Objednavatel</th>
+            <th>Address</th>
+            <th>When</th>
+            <th>Status</th>
+            <th>Trainer</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for training in trainings %}
+            <tr>
+              <td>{{ training.training_type }}</td>
+              <td>{{ training.customer_name|default:"—" }}</td>
+              <td>{{ training.address }}</td>
+              <td>{{ training.start_datetime|date:"Y-m-d H:i" }}</td>
+              <td><span class="pill">{{ training.get_status_display }}</span></td>
+              <td>{{ training.assigned_trainer|default:"—" }}</td>
+              <td><a href="{% url 'training_detail' training.pk %}">Detail</a></td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="7" class="muted">No trainings yet.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

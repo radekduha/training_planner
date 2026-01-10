@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8">
+    <title>{% block title %}Training Planner{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f8f7f3;
+        --card: #ffffff;
+        --ink: #1b1b1b;
+        --muted: #6b6b6b;
+        --accent: #1f6a4f;
+        --line: #e6e1d8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+        background: radial-gradient(circle at top right, #f1efe7, #f8f7f3 55%);
+        color: var(--ink);
+      }
+      header {
+        background: #111;
+        color: #f7f3ea;
+        padding: 18px 24px;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 22px;
+        letter-spacing: 0.5px;
+      }
+      nav {
+        margin-top: 8px;
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      nav a {
+        color: #f7f3ea;
+        text-decoration: none;
+        font-size: 14px;
+      }
+      main {
+        padding: 24px;
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+      main.wide {
+        max-width: 100%;
+      }
+      h2 {
+        margin-top: 0;
+        font-size: 26px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 18px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+      }
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+      .grid-2 {
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      .calendar {
+        table-layout: fixed;
+      }
+      .calendar col {
+        width: 14.285%;
+      }
+      th, td {
+        padding: 10px 8px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .btn {
+        display: inline-block;
+        background: var(--accent);
+        color: #fff;
+        padding: 8px 14px;
+        border-radius: 999px;
+        text-decoration: none;
+        font-size: 14px;
+        border: none;
+        cursor: pointer;
+      }
+      .btn-outline {
+        background: transparent;
+        border: 1px solid var(--accent);
+        color: var(--accent);
+      }
+      form label {
+        display: block;
+        margin-top: 12px;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+      input, select, textarea {
+        width: 100%;
+        margin-top: 6px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font-size: 14px;
+        font-family: inherit;
+      }
+      input[type="checkbox"] {
+        width: auto;
+        margin-right: 6px;
+      }
+      ul {
+        padding-left: 18px;
+      }
+      .inline {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .filters {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        align-items: end;
+      }
+      .filters .actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .checkbox-row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-top: 12px;
+      }
+      .calendar td {
+        height: 110px;
+        padding: 8px;
+      }
+      .calendar a {
+        overflow-wrap: anywhere;
+      }
+      .calendar .off-month {
+        background: #f2efe7;
+      }
+      .pill {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #ece7dc;
+        font-size: 12px;
+        color: #333;
+      }
+      @media (max-width: 600px) {
+        header {
+          padding: 16px;
+        }
+        main {
+          padding: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Training Planner</h1>
+      <nav>
+        <a href="{% url 'training_list' %}">Trainings</a>
+        <a href="{% url 'training_calendar' %}">Calendar</a>
+        <a href="{% url 'training_calendar_week' %}">Week</a>
+        <a href="{% url 'training_create' %}">New training</a>
+        <a href="{% url 'trainer_list' %}">Trainers</a>
+        <a href="{% url 'trainer_create' %}">New trainer</a>
+        <a href="{% url 'training_type_list' %}">Training types</a>
+        <a href="/admin/">Admin</a>
+        {% if user.is_authenticated %}
+          <a href="{% url 'logout' %}">Logout</a>
+        {% else %}
+          <a href="{% url 'login' %}">Login</a>
+        {% endif %}
+      </nav>
+    </header>
+    <main class="{% block main_class %}{% endblock %}">
+      {% if messages %}
+        <div class="card" style="margin-bottom: 16px;">
+          {% for message in messages %}
+            <div class="muted">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

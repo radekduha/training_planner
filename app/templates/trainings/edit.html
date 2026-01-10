@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Edit training · Training Planner{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h2>Edit training</h2>
+    <p class="muted">{{ training.training_type }} · {{ training.start_datetime|date:"Y-m-d H:i" }}</p>
+    <form method="post">
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+      <label for="{{ form.training_type.id_for_label }}">Training type</label>
+      {{ form.training_type }}
+
+      <label for="{{ form.customer_name.id_for_label }}">Objednavatel</label>
+      {{ form.customer_name }}
+
+      <label for="{{ form.address.id_for_label }}">Address</label>
+      {{ form.address }}
+
+      <div class="grid grid-2">
+        <div>
+          <label for="{{ form.lat.id_for_label }}">Lat</label>
+          {{ form.lat }}
+        </div>
+        <div>
+          <label for="{{ form.lng.id_for_label }}">Lng</label>
+          {{ form.lng }}
+        </div>
+      </div>
+
+      <div class="grid grid-2">
+        <div>
+          <label for="{{ form.start_datetime.id_for_label }}">Start</label>
+          {{ form.start_datetime }}
+        </div>
+        <div>
+          <label for="{{ form.end_datetime.id_for_label }}">End</label>
+          {{ form.end_datetime }}
+        </div>
+      </div>
+
+      <label for="{{ form.status.id_for_label }}">Status</label>
+      {{ form.status }}
+
+      <label for="{{ form.assigned_trainer.id_for_label }}">Assigned trainer</label>
+      {{ form.assigned_trainer }}
+
+      <label for="{{ form.assignment_reason.id_for_label }}">Assignment reason</label>
+      {{ form.assignment_reason }}
+
+      <label for="{{ form.notes.id_for_label }}">Notes</label>
+      {{ form.notes }}
+
+      <div class="inline" style="margin-top: 16px;">
+        <button class="btn" type="submit">Save changes</button>
+        <a class="btn btn-outline" href="{% url 'training_detail' training.pk %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "training_planner.settings"
+python_files = ["test_*.py", "*_test.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

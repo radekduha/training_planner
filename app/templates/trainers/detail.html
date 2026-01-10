@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Trainer detail · Training Planner{% endblock %}
+
+{% block content %}
+  <div class="grid grid-2">
+    <div class="card">
+      <h2>{{ trainer.name }}</h2>
+      <div class="inline" style="margin-bottom: 12px;">
+        <a class="btn btn-outline" href="{% url 'trainer_edit' trainer.pk %}">Edit trainer</a>
+      </div>
+      <p class="muted">{{ trainer.email|default:"—" }} · {{ trainer.phone|default:"—" }}</p>
+      <p><strong>Home:</strong> {{ trainer.home_address }}</p>
+      <p><strong>Lat/Lng:</strong> {{ trainer.home_lat|default:"—" }}, {{ trainer.home_lng|default:"—" }}</p>
+      <p><strong>Hourly rate:</strong> {{ trainer.hourly_rate|default:"—" }}</p>
+      <p><strong>Travel rate:</strong> {{ trainer.travel_rate_km|default:"—" }}</p>
+      <p><strong>Notes:</strong> {{ trainer.notes|default:"—" }}</p>
+      <p><strong>Workload this month:</strong> {{ month_workload }} trainings, {{ month_long_trips }} long trips</p>
+
+      <h3>Training types</h3>
+      {% if trainer.skills.all %}
+        {% for skill in trainer.skills.all %}
+          <span class="pill">{{ skill.training_type.name }}</span>
+        {% endfor %}
+      {% else %}
+        <p class="muted">No training types assigned.</p>
+      {% endif %}
+
+      <h3>Rules</h3>
+      {% if trainer.rules.all %}
+        <ul>
+          {% for rule in trainer.rules.all %}
+            <li>{{ rule.get_rule_type_display }}: {{ rule.rule_value.value|default:rule.rule_value }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">No rules yet.</p>
+      {% endif %}
+    </div>
+    <div class="card">
+      <h2>Assigned trainings</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Training</th>
+            <th>Date</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for training in trainings %}
+            <tr>
+              <td><a href="{% url 'training_detail' training.pk %}">{{ training.training_type }}</a></td>
+              <td>{{ training.start_datetime|date:"Y-m-d H:i" }}</td>
+              <td>{{ training.get_status_display }}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="3" class="muted">No trainings assigned yet.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

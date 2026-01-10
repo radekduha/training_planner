@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Training detail · Training Planner{% endblock %}
+
+{% block content %}
+  <div class="grid grid-2">
+    <div class="card">
+      <h2>Training detail</h2>
+      <p class="muted">
+        {{ training.training_type }}
+        · {{ training.start_datetime|date:"Y-m-d H:i" }}
+        – {{ training.end_datetime|date:"Y-m-d H:i" }}
+      </p>
+      <p><strong>Objednavatel:</strong> {{ training.customer_name|default:"—" }}</p>
+      <p><strong>Address:</strong> {{ training.address }}</p>
+      <p><strong>Lat/Lng:</strong> {{ training.lat|default:"—" }}, {{ training.lng|default:"—" }}</p>
+      <p><strong>Status:</strong> {{ training.get_status_display }}</p>
+      <p><strong>Trainer:</strong> {{ training.assigned_trainer|default:"—" }}</p>
+      <p><strong>Assignment reason:</strong> {{ training.assignment_reason|default:"—" }}</p>
+      <p><strong>Notes:</strong> {{ training.notes|default:"—" }}</p>
+
+      <h3>Update</h3>
+      <div class="inline" style="margin-bottom: 12px;">
+        <a class="btn btn-outline" href="{% url 'training_edit' training.pk %}">Edit training</a>
+      </div>
+      <form method="post">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        <label for="{{ form.status.id_for_label }}">Status</label>
+        {{ form.status }}
+        <label for="{{ form.assigned_trainer.id_for_label }}">Assigned trainer</label>
+        {{ form.assigned_trainer }}
+        <label for="{{ form.customer_name.id_for_label }}">Objednavatel</label>
+        {{ form.customer_name }}
+        <label for="{{ form.assignment_reason.id_for_label }}">Assignment reason</label>
+        {{ form.assignment_reason }}
+        <label for="{{ form.notes.id_for_label }}">Notes</label>
+        {{ form.notes }}
+        <div class="inline" style="margin-top: 12px;">
+          <button class="btn" type="submit">Save changes</button>
+          <a class="btn btn-outline" href="{% url 'training_list' %}">Back</a>
+        </div>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Recommended trainers</h2>
+      {% if used_compromise and recommendations %}
+        <p class="muted">No trainer meets all hard conditions. Showing closest compromises.</p>
+      {% endif %}
+      {% if recommendations %}
+        <table>
+          <thead>
+            <tr>
+              <th>Trainer</th>
+              <th>Score</th>
+              <th>Cost</th>
+              <th>Why</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for rec in recommendations %}
+              <tr>
+                <td>{{ rec.trainer.name }}</td>
+                <td>{{ rec.score|floatformat:0 }}</td>
+                <td>{{ rec.estimated_cost|floatformat:0|default:"—" }}</td>
+                <td>
+                  {% for reason in rec.reasons %}
+                    <div>{{ reason }}</div>
+                  {% endfor %}
+                  {% for warning in rec.warnings %}
+                    <div class="muted">⚠ {{ warning }}</div>
+                  {% endfor %}
+                </td>
+                <td>
+                  <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="status" value="assigned">
+                    <input type="hidden" name="assigned_trainer" value="{{ rec.trainer.id }}">
+                    <input type="hidden" name="assignment_reason" value="{{ rec.reasons|join:', ' }}{% if rec.warnings %} | Warnings: {{ rec.warnings|join:', ' }}{% endif %}">
+                    <input type="hidden" name="notes" value="{{ training.notes }}">
+                    <button class="btn btn-outline" type="submit">Assign</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        {% if used_compromise %}
+          <p class="muted">No trainer meets the conditions and no close compromise was found.</p>
+        {% else %}
+          <p class="muted">No recommendations yet. Add trainers and ensure the address has coordinates.</p>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

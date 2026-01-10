@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Edit trainer · Training Planner{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h2>Edit trainer</h2>
+    <p class="muted">{{ trainer.name }}</p>
+    <form method="post">
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+
+      <label for="{{ form.name.id_for_label }}">Name</label>
+      {{ form.name }}
+
+      <div class="grid grid-2">
+        <div>
+          <label for="{{ form.email.id_for_label }}">Email</label>
+          {{ form.email }}
+        </div>
+        <div>
+          <label for="{{ form.phone.id_for_label }}">Phone</label>
+          {{ form.phone }}
+        </div>
+      </div>
+
+      <label for="{{ form.home_address.id_for_label }}">Home address</label>
+      {{ form.home_address }}
+
+      <div class="grid grid-2">
+        <div>
+          <label for="{{ form.home_lat.id_for_label }}">Home lat</label>
+          {{ form.home_lat }}
+        </div>
+        <div>
+          <label for="{{ form.home_lng.id_for_label }}">Home lng</label>
+          {{ form.home_lng }}
+        </div>
+      </div>
+
+      <div class="grid grid-2">
+        <div>
+          <label for="{{ form.hourly_rate.id_for_label }}">Hourly rate (CZK)</label>
+          {{ form.hourly_rate }}
+        </div>
+        <div>
+          <label for="{{ form.travel_rate_km.id_for_label }}">Travel rate (CZK/km)</label>
+          {{ form.travel_rate_km }}
+        </div>
+      </div>
+
+      <label for="{{ form.notes.id_for_label }}">Notes</label>
+      {{ form.notes }}
+
+      <h3 style="margin-top: 20px;">Training types</h3>
+      {{ form.training_types }}
+
+      <h3 style="margin-top: 20px;">Rules</h3>
+      <label for="{{ form.max_distance_km.id_for_label }}">Max distance (km)</label>
+      {{ form.max_distance_km }}
+      <label for="{{ form.weekend_allowed.id_for_label }}">Weekend allowed</label>
+      {{ form.weekend_allowed }}
+      <label for="{{ form.max_long_trips_per_month.id_for_label }}">Max long trips per month</label>
+      {{ form.max_long_trips_per_month }}
+      <label for="{{ form.preferred_weekdays.id_for_label }}">Preferred weekdays</label>
+      {{ form.preferred_weekdays }}
+
+      <div class="inline" style="margin-top: 16px;">
+        <button class="btn" type="submit">Save changes</button>
+        <a class="btn btn-outline" href="{% url 'trainer_detail' trainer.pk %}">Cancel</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

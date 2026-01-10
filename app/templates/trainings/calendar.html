@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Calendar · Training Planner{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="inline" style="justify-content: space-between;">
+      <h2>{{ month_name }} {{ year }}</h2>
+      <div class="inline">
+        <a class="btn btn-outline" href="{% url 'training_calendar' %}?year={{ prev_year }}&month={{ prev_month }}">Prev</a>
+        <a class="btn btn-outline" href="{% url 'training_calendar' %}?year={{ next_year }}&month={{ next_month }}">Next</a>
+        <a class="btn btn-outline" href="{% url 'training_calendar_week' %}?date={{ today|date:'Y-m-d' }}">Week view</a>
+      </div>
+    </div>
+    <table class="calendar">
+      <colgroup>
+        <col>
+        <col>
+        <col>
+        <col>
+        <col>
+        <col>
+        <col>
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Mon</th>
+          <th>Tue</th>
+          <th>Wed</th>
+          <th>Thu</th>
+          <th>Fri</th>
+          <th>Sat</th>
+          <th>Sun</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for week in weeks %}
+          <tr>
+            {% for day in week %}
+              <td class="{% if not day.in_month %}off-month{% endif %}">
+                <div class="muted" style="font-size: 12px;">{{ day.date|date:"j" }}</div>
+                {% for training in day.trainings %}
+                  <div style="margin-top: 6px;">
+                    <a href="{% url 'training_detail' training.pk %}">
+                      {{ training.training_type }}
+                      {% if training.customer_name %}· {{ training.customer_name }}{% endif %}
+                    </a>
+                    <div class="muted" style="font-size: 12px;">
+                      {{ training.start_datetime|date:"H:i" }}
+                      · {{ training.get_status_display }}
+                      {% if not training.customer_name %}· {{ training.address }}{% endif %}
+                    </div>
+                  </div>
+                {% endfor %}
+              </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

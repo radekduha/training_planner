@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Training types · Training Planner{% endblock %}
+
+{% block content %}
+  <div class="grid grid-2">
+    <div class="card">
+      <h2>Training types</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ttype in training_types %}
+            <tr>
+              <td>{{ ttype.name }}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td class="muted">No training types yet.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h2>Add type</h2>
+      <form method="post">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        <label for="{{ form.name.id_for_label }}">Name</label>
+        {{ form.name }}
+        <div class="inline" style="margin-top: 16px;">
+          <button class="btn" type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}

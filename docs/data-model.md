@@ -19,7 +19,8 @@
 - home_address
 - home_lat
 - home_lng
-- base_price
+- hourly_rate
+- travel_rate_km
 - notes
 - created_at
 - updated_at
@@ -38,6 +39,7 @@
 ### training
 - id
 - training_type_id
+- customer_name
 - address
 - lat
 - lng
@@ -45,6 +47,7 @@
 - end_datetime
 - status
 - assigned_trainer_id (nullable)
+- assignment_reason
 - google_event_id (nullable)
 - notes
 - created_at

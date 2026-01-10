@@ -294,7 +294,8 @@ The basic data model remains simple:
 - name
 - home_address
 - lat, lng
-- base_price
+- hourly_rate
+- travel_rate_km
 - notes
 - created_at
 - updated_at

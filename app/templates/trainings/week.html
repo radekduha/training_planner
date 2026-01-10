@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Week view · Training Planner{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div class="inline" style="justify-content: space-between;">
+      <h2>Week of {{ week_start|date:"Y-m-d" }}</h2>
+      <div class="inline">
+        <a class="btn btn-outline" href="{% url 'training_calendar_week' %}?date={{ prev_date|date:'Y-m-d' }}">Prev</a>
+        <a class="btn btn-outline" href="{% url 'training_calendar_week' %}?date={{ next_date|date:'Y-m-d' }}">Next</a>
+        <a class="btn btn-outline" href="{% url 'training_calendar' %}">Month view</a>
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          {% for day in days %}
+            <th>{{ day.date|date:"D j" }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          {% for day in days %}
+            <td style="vertical-align: top; height: 140px;">
+              {% for training in day.trainings %}
+                <div style="margin-bottom: 8px;">
+                  <a href="{% url 'training_detail' training.pk %}">
+                    {{ training.training_type }}
+                    {% if training.customer_name %}· {{ training.customer_name }}{% endif %}
+                  </a>
+                  <div class="muted" style="font-size: 12px;">
+                    {{ training.start_datetime|date:"H:i" }}
+                    · {{ training.get_status_display }}
+                    {% if not training.customer_name %}· {{ training.address }}{% endif %}
+                  </div>
+                </div>
+              {% empty %}
+                <span class="muted">—</span>
+              {% endfor %}
+            </td>
+          {% endfor %}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+{% endblock %}
