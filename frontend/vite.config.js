@@ -11,8 +11,6 @@ export default defineConfig(({ command }) => ({
   server: {
     proxy: {
       "/api": "http://127.0.0.1:8000",
-      "/login": "http://127.0.0.1:8000",
-      "/logout": "http://127.0.0.1:8000",
       "/admin": "http://127.0.0.1:8000",
     },
   },

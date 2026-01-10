@@ -42,7 +42,7 @@ export const requestJson = async (path, options = {}) => {
   });
   if (response.redirected && response.url.includes("/login")) {
     if (typeof window !== "undefined") {
-      window.location.assign(response.url);
+      window.location.assign("/login");
       return new Promise(() => {});
     }
   }
@@ -52,7 +52,7 @@ export const requestJson = async (path, options = {}) => {
   if (!response.ok || !isJson) {
     if (!isJson && typeof data === "string" && data.includes("Login")) {
       if (typeof window !== "undefined") {
-        window.location.assign("/login/");
+        window.location.assign("/login");
         return new Promise(() => {});
       }
     }
