@@ -790,7 +790,56 @@ api.get(
     const trainers = await prisma.trainer.findMany({
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     });
-    res.json({ items: trainers.map((trainer) => trainerPayload(trainer, false)) });
+    if (!trainers.length) {
+      return res.json({ items: [] });
+    }
+
+    const trainerIds = trainers.map((trainer) => trainer.id);
+    const now = new Date();
+
+    const [trainingCounts, upcomingTrainings] = await Promise.all([
+      prisma.training.groupBy({
+        by: ["assignedTrainerId"],
+        where: {
+          assignedTrainerId: { in: trainerIds },
+          status: { not: "canceled" },
+        },
+        _count: { _all: true },
+      }),
+      prisma.training.findMany({
+        where: {
+          assignedTrainerId: { in: trainerIds },
+          status: { not: "canceled" },
+          startDatetime: { gte: now },
+        },
+        include: trainingIncludes,
+        orderBy: { startDatetime: "asc" },
+      }),
+    ]);
+
+    const countsByTrainer = trainingCounts.reduce((acc, item) => {
+      if (item.assignedTrainerId) {
+        acc[item.assignedTrainerId] = item._count._all;
+      }
+      return acc;
+    }, {});
+
+    const nextTrainingByTrainer = upcomingTrainings.reduce((acc, training) => {
+      if (training.assignedTrainerId && !acc[training.assignedTrainerId]) {
+        acc[training.assignedTrainerId] = training;
+      }
+      return acc;
+    }, {});
+
+    const items = trainers.map((trainer) => {
+      const payload = trainerPayload(trainer, false);
+      payload.assigned_trainings_count = countsByTrainer[trainer.id] || 0;
+      const nextTraining = nextTrainingByTrainer[trainer.id];
+      payload.next_assigned_training = nextTraining ? trainingListItem(nextTraining) : null;
+      return payload;
+    });
+
+    return res.json({ items });
   })
 );
 
