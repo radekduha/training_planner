@@ -6,9 +6,9 @@
 - Commit messages are imperative and specific (e.g., "Add trainer rules").
 
 ## Code style
-- Format and lint with ruff.
+- Format with Prettier and lint with ESLint (add when the repo stabilizes).
 - Prefer explicit naming over short names.
-- Use type hints for core domain services.
+- Use JSDoc annotations for core domain services.
 
 ## Testing
 - Unit tests for matching, scoring, and rule evaluation.

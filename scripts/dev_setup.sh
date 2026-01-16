@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+npm install
+(cd backend && npm install)
+(cd frontend && npm install)
+
+if [ -f ".env" ] && [ ! -f "backend/.env" ]; then
+  cp .env backend/.env
+fi

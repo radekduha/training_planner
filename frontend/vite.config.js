@@ -5,18 +5,16 @@ import react from "@vitejs/plugin-react";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig(({ command }) => ({
+export default defineConfig(() => ({
   plugins: [react()],
-  base: command === "serve" ? "/" : "/static/frontend/",
+  base: "/",
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:8000",
-      "/admin": "http://127.0.0.1:8000",
+      "/api": "http://127.0.0.1:3001",
     },
   },
   build: {
-    outDir: path.resolve(__dirname, "../app/static/frontend"),
+    outDir: path.resolve(__dirname, "../backend/public"),
     emptyOutDir: true,
-    manifest: true,
   },
 }));

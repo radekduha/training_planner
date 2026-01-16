@@ -32,42 +32,29 @@ Focus: clear workflow, predictable rules, and minimal manual checks.
 
 ## Local setup (no Docker)
 Requirements:
-- Python 3.9+
 - Node.js 18+
 
-1) Create a virtualenv:
-   - `python3 -m venv .venv`
-   - `source .venv/bin/activate`
-2) Install dependencies:
-   - `pip install -r requirements.txt -r requirements-dev.txt`
-3) Configure env:
+1) Configure env:
    - `cp .env.example .env`
-4) Frontend deps:
-   - `cd frontend`
-   - `npm install`
-
-Shortcut:
-- `scripts/dev_setup.sh`
+   - `cp .env backend/.env` (Prisma reads `.env` from `backend`)
+2) Install deps:
+   - `npm run setup`
 
 Run the app:
-- `python app/manage.py makemigrations`
-- `python app/manage.py migrate`
-- `python app/manage.py createsuperuser`
-- `python app/manage.py runserver`
+- `npx prisma migrate dev --schema backend/prisma/schema.prisma`
+- `npm run dev`
 
-Frontend (dev server):
-- Set `VITE_DEV_SERVER=http://localhost:5173` in `.env`.
-- Run `npm run dev` in `frontend`.
-- Open `http://127.0.0.1:8000/`.
+Open `http://127.0.0.1:5173/`.
 
 MVP note:
 - Matching needs lat/lng on trainings and trainers. Geocoding uses Nominatim; you can still enter coordinates manually.
 
 Login:
-- Visit `http://127.0.0.1:8000/login/` and use the superuser credentials.
+- Visit `http://127.0.0.1:5173/login/` and use the admin credentials from `.env`.
 
 ## Repo structure
-- `app/` - Application code (Django project will live here).
+- `backend/` - Express + Prisma backend (JSON APIs, matching, geocoding).
+- `app/` - Legacy Django backend (kept for reference during migration).
 - `docs/` - Product, architecture, and engineering docs.
 - `frontend/` - React SPA (Vite build).
 - `infra/` - Deployment and ops configuration.

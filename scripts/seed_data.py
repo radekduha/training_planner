@@ -2,8 +2,7 @@
 """
 Seed data scaffold for local testing.
 
-Once the Django project exists, convert this into a management command
-or call the ORM directly from here.
+Once the Node backend is ready, implement this using Prisma or direct SQL.
 """
 
 from __future__ import annotations

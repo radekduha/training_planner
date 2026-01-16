@@ -1,16 +1,16 @@
 # Architecture
 
 ## Overview
-Single web application with a React SPA frontend and Django JSON APIs. The core
+Single web application with a React SPA frontend and Express JSON APIs. The core
 is a matching engine that filters and ranks trainers for a training session.
 
 ## Components
 - UI (React SPA): list views, forms, and calendar views.
-- API layer (Django JSON endpoints) with session auth + CSRF.
+- API layer (Express JSON endpoints) with session auth + CSRF.
 - Domain services:
   - Matching service: hard filters + scoring.
   - Geocoding service: address to lat/lng, cached.
-- Data access: Django ORM.
+- Data access: Prisma ORM.
 
 ## Data flow (create training)
 1. User creates a training in the SPA (JSON POST).

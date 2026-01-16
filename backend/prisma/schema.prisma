@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model TrainingType {
+  id        Int           @id @default(autoincrement())
+  name      String        @unique
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  trainings Training[]
+  skills    TrainerSkill[]
+}
+
+model Trainer {
+  id             Int           @id @default(autoincrement())
+  name           String
+  email          String?
+  phone          String?
+  homeAddress    String
+  homeLat        Float?
+  homeLng        Float?
+  hourlyRate     Float?
+  travelRateKm   Float?
+  notes          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  skills         TrainerSkill[]
+  rules          TrainerRule[]
+  assignedTrainings Training[]
+}
+
+model TrainerSkill {
+  id             Int          @id @default(autoincrement())
+  trainerId      Int
+  trainingTypeId Int
+  trainer        Trainer      @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  trainingType   TrainingType @relation(fields: [trainingTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([trainerId, trainingTypeId])
+}
+
+model TrainerRule {
+  id        Int     @id @default(autoincrement())
+  trainerId Int
+  ruleType  String
+  ruleValue String
+  trainer   Trainer @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+
+  @@index([trainerId, ruleType])
+}
+
+model Training {
+  id               Int          @id @default(autoincrement())
+  trainingTypeId   Int
+  customerName     String?
+  address          String
+  lat              Float?
+  lng              Float?
+  startDatetime    DateTime
+  endDatetime      DateTime
+  status           String
+  assignedTrainerId Int?
+  assignmentReason String?
+  googleEventId    String?
+  notes            String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  trainingType     TrainingType @relation(fields: [trainingTypeId], references: [id], onDelete: Restrict)
+  assignedTrainer  Trainer?     @relation(fields: [assignedTrainerId], references: [id], onDelete: SetNull)
+
+  @@index([startDatetime])
+  @@index([status])
+  @@index([assignedTrainerId])
+}
+
+model GeocodingCache {
+  id        Int      @id @default(autoincrement())
+  address   String   @unique
+  lat       Float
+  lng       Float
+  provider  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
