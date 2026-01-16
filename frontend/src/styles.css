@@ -248,6 +248,17 @@ a {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
+.trainer-detail-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .trainer-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .overview-stats {
   display: grid;
   gap: 16px;

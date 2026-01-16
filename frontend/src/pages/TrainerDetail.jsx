@@ -207,7 +207,7 @@ const TrainerDetail = () => {
           </Link>
         }
       />
-      <div className="grid two">
+      <div className="grid trainer-detail-grid">
         <div className="stack">
           <div className="card">
             <h3>Profil</h3>
