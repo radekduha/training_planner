@@ -135,29 +135,29 @@ const recommendTrainers = (training, trainers, existingTrainings) => {
 
     const skillIds = new Set((trainer.skills || []).map((skill) => skill.trainingTypeId));
     if (!skillIds.has(training.trainingTypeId)) {
-      ruleFailures.push("Does not teach this training type");
+      ruleFailures.push("Neučí tento typ tréninku");
     }
 
     const maxDistance = ruleValue(trainer, "max_distance_km");
     if (maxDistance && distance > maxDistance) {
-      ruleFailures.push(`Over max distance (${maxDistance} km)`);
+      ruleFailures.push(`Překročena max. vzdálenost (${maxDistance} km)`);
     }
 
     const weekendAllowed = ruleValue(trainer, "weekend_allowed");
     if (weekendAllowed === false && isWeekend(training.startDatetime)) {
-      ruleFailures.push("No weekend availability");
+      ruleFailures.push("Víkendy nepovoleny");
     }
 
     const assignedTrainings = trainingsByTrainer[trainer.id] || [];
     if (hasConflict(training, assignedTrainings)) {
-      ruleFailures.push("Time conflict");
+      ruleFailures.push("Časová kolize");
     }
 
     const maxLongTrips = ruleValue(trainer, "max_long_trips_per_month");
     const longTrips = longTripCount(trainer, training, assignedTrainings, LONG_TRIP_THRESHOLD_KM);
     if (maxLongTrips !== null && distance > LONG_TRIP_THRESHOLD_KM) {
       if (longTrips >= maxLongTrips) {
-        ruleFailures.push("Long trip limit reached");
+        ruleFailures.push("Dosažen limit dlouhých cest");
       }
     }
 
@@ -177,16 +177,16 @@ const recommendTrainers = (training, trainers, existingTrainings) => {
       const weekday = (training.startDatetime.getDay() + 6) % 7;
       if (!preferredWeekdays.includes(weekday)) {
         score -= 15.0;
-        softWarnings.push("Outside preferred weekdays");
+        softWarnings.push("Mimo preferované dny");
       }
     }
 
     const reasons = [
-      `Distance ${distance.toFixed(1)} km`,
-      `Workload ${totalWorkload} (trainings ${monthlyWorkload}, long trips ${longTrips})`,
+      `Vzdálenost ${distance.toFixed(1)} km`,
+      `Vytížení ${totalWorkload} (tréninky ${monthlyWorkload}, dlouhé cesty ${longTrips})`,
     ];
     if (estCost !== null) {
-      reasons.push(`Estimated cost ${Math.round(estCost)} CZK`);
+      reasons.push(`Odhadované náklady ${Math.round(estCost)} Kč`);
     }
 
     const match = {

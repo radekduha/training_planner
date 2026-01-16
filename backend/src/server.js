@@ -41,7 +41,7 @@ const VALID_STATUSES = new Set([
 const app = express();
 
 app.use(cookieParser());
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "5mb" }));
 app.use(
   session({
     name: "tp_session",
@@ -109,6 +109,203 @@ const parseBoolean = (value) => {
     return false;
   }
   return null;
+};
+
+const normalizeHeader = (value) => {
+  if (!value) {
+    return "";
+  }
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+};
+
+const HEADER_ALIASES = {
+  monday: ["monday", "po", "pondeli", "pondělí"],
+  tuesday: ["tuesday", "tu", "utery", "úterý"],
+  wednesday: ["wednesday", "we", "streda", "středa"],
+  thursday: ["thursday", "th", "ctvrtek", "čtvrtek"],
+  friday: ["friday", "fr", "patek", "pátek"],
+  saturday: ["saturday", "sa", "sobota"],
+  sunday: ["sunday", "su", "nedele", "neděle"],
+  first_name: ["first_name", "firstname", "first name", "jmeno", "jméno"],
+  last_name: ["last_name", "lastname", "last name", "prijmeni", "příjmení"],
+  title_prefix: [
+    "title_prefix",
+    "title prefix",
+    "titul_pred_jmenem",
+    "titul před jménem",
+    "prefix",
+  ],
+  title_suffix: [
+    "title_suffix",
+    "title suffix",
+    "titul_za_jmenem",
+    "titul za jménem",
+    "suffix",
+  ],
+  frequency_quantity: ["frequency_quantity", "frequency quantity", "frekvence_hodnota"],
+  frequency_period: ["frequency_period", "frequency period", "frekvence_jednotka"],
+  distance_limit: ["distance_limit", "distance limit", "limit_vzdalenosti"],
+  limit_note: ["limit_note", "limit note", "poznamka_k_limitu", "poznámka k limitu"],
+  akris: ["akris"],
+  call_before_training: [
+    "call_before_training",
+    "call before training",
+    "zavolat_pred_treninkem",
+    "zavolat před tréninkem",
+  ],
+  email: ["email", "e-mail", "mail"],
+  phone: ["phone", "telefon", "tel"],
+  home_address: [
+    "home_address",
+    "home address",
+    "home",
+    "address",
+    "adresa",
+    "adresa_bydliste",
+    "bydliste",
+    "bydliště",
+  ],
+  home_lat: ["home_lat", "home latitude", "latitude", "sirka", "šířka", "zemepisna_sirka"],
+  home_lng: ["home_lng", "home longitude", "longitude", "delka", "délka", "zemepisna_delka"],
+  hourly_rate: [
+    "hourly_rate",
+    "hourly rate",
+    "hodinova_sazba",
+    "hodinová_sazba",
+    "hodinova_sazba_kc",
+  ],
+  travel_rate_km: [
+    "travel_rate_km",
+    "travel rate",
+    "travel_rate",
+    "cestovne",
+    "cestovné",
+    "cestovne_kc_km",
+  ],
+  notes: ["notes", "note", "poznamka", "poznámka", "poznamky", "poznámky"],
+};
+
+const HEADER_LOOKUP = Object.entries(HEADER_ALIASES).reduce((acc, [key, aliases]) => {
+  aliases.forEach((alias) => {
+    acc[normalizeHeader(alias)] = key;
+  });
+  return acc;
+}, {});
+
+const buildHeaderIndex = (headers) => {
+  const index = {};
+  headers.forEach((header, idx) => {
+    const normalized = normalizeHeader(header);
+    const key = HEADER_LOOKUP[normalized];
+    if (key && index[key] === undefined) {
+      index[key] = idx;
+    }
+  });
+  return index;
+};
+
+const detectDelimiter = (line) => {
+  const counts = { ",": 0, ";": 0, "\t": 0 };
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === "\"") {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && counts[char] !== undefined) {
+      counts[char] += 1;
+    }
+  }
+  if (counts[";"] >= counts[","] && counts[";"] >= counts["\t"] && counts[";"] > 0) {
+    return ";";
+  }
+  if (counts["\t"] > counts[","]) {
+    return "\t";
+  }
+  return ",";
+};
+
+const parseCsv = (input, delimiter) => {
+  const rows = [];
+  let row = [];
+  let current = "";
+  let inQuotes = false;
+  const text = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (inQuotes) {
+      if (char === "\"") {
+        if (text[i + 1] === "\"") {
+          current += "\"";
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inQuotes = true;
+      continue;
+    }
+    if (char === delimiter) {
+      row.push(current);
+      current = "";
+      continue;
+    }
+    if (char === "\n") {
+      row.push(current);
+      rows.push(row);
+      row = [];
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+
+  if (current.length || row.length) {
+    row.push(current);
+    rows.push(row);
+  }
+
+  return rows;
+};
+
+const parseCsvBoolean = (value, fallback) => {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return fallback;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (["ano", "a", "true", "1", "yes", "y"].includes(normalized)) {
+    return true;
+  }
+  if (["ne", "n", "false", "0", "no"].includes(normalized)) {
+    return false;
+  }
+  return null;
+};
+
+const parseCsvNumber = (value) => {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return null;
+  }
+  const normalized = String(value).trim().replace(/\s+/g, "").replace(",", ".");
+  const parsed = Number(normalized);
+  if (Number.isNaN(parsed)) {
+    return null;
+  }
+  return parsed;
 };
 
 const buildRuleData = (trainerId, ruleType, value) => {
@@ -192,7 +389,9 @@ api.get(
   asyncHandler(async (req, res) => {
     const [trainingTypes, trainers] = await Promise.all([
       prisma.trainingType.findMany({ orderBy: { name: "asc" } }),
-      prisma.trainer.findMany({ orderBy: { name: "asc" } }),
+      prisma.trainer.findMany({
+        orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+      }),
     ]);
     res.json({
       training_types: trainingTypes.map(trainingTypePayload),
@@ -588,8 +787,212 @@ api.get(
   "/trainers/",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const trainers = await prisma.trainer.findMany({ orderBy: { name: "asc" } });
+    const trainers = await prisma.trainer.findMany({
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    });
     res.json({ items: trainers.map((trainer) => trainerPayload(trainer, false)) });
+  })
+);
+
+api.post(
+  "/trainers/import/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const csv = payload.csv;
+    if (!csv || typeof csv !== "string") {
+      return res.status(400).json({ error: "CSV obsah je povinný." });
+    }
+
+    const text = csv.charCodeAt(0) === 0xfeff ? csv.slice(1) : csv;
+    const firstLine = text.split(/\r?\n/, 1)[0] || "";
+    const delimiter = detectDelimiter(firstLine);
+    const rows = parseCsv(text, delimiter);
+    if (!rows.length) {
+      return res.status(400).json({ error: "CSV soubor je prázdný." });
+    }
+
+    const headers = rows[0].map((header) => String(header || "").trim());
+    const headerIndex = buildHeaderIndex(headers);
+    const requiredHeaders = ["first_name", "last_name", "home_address"];
+    const missingHeaders = requiredHeaders.filter((key) => headerIndex[key] === undefined);
+    if (missingHeaders.length) {
+      return res.status(400).json({
+        error: `Chybí povinné sloupce: ${missingHeaders.join(", ")}.`,
+      });
+    }
+
+    const dryRun = payload.dry_run === true;
+    const errors = [];
+    let imported = 0;
+    let skipped = 0;
+
+    const getValue = (row, key) => {
+      const idx = headerIndex[key];
+      if (idx === undefined) {
+        return "";
+      }
+      return row[idx] ?? "";
+    };
+
+    const weekdayColumns = [
+      { key: "monday", value: 0 },
+      { key: "tuesday", value: 1 },
+      { key: "wednesday", value: 2 },
+      { key: "thursday", value: 3 },
+      { key: "friday", value: 4 },
+      { key: "saturday", value: 5 },
+      { key: "sunday", value: 6 },
+    ];
+
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i];
+      const rowNumber = i + 1;
+      if (!row || row.every((cell) => !String(cell || "").trim())) {
+        continue;
+      }
+
+      const rowErrors = [];
+      const firstName = String(getValue(row, "first_name")).trim();
+      if (!firstName) {
+        rowErrors.push({ field: "first_name", message: "Jméno je povinné." });
+      }
+      const lastName = String(getValue(row, "last_name")).trim();
+      if (!lastName) {
+        rowErrors.push({ field: "last_name", message: "Příjmení je povinné." });
+      }
+      const homeAddress = String(getValue(row, "home_address")).trim();
+      if (!homeAddress) {
+        rowErrors.push({ field: "home_address", message: "Adresa je povinná." });
+      }
+
+      const titlePrefix = String(getValue(row, "title_prefix") || "").trim();
+      const titleSuffix = String(getValue(row, "title_suffix") || "").trim();
+      const email = String(getValue(row, "email") || "").trim();
+      if (email && !email.includes("@")) {
+        rowErrors.push({ field: "email", message: "Neplatný e-mail." });
+      }
+      const phone = String(getValue(row, "phone") || "").trim();
+
+      const akris = parseCsvBoolean(getValue(row, "akris"), false);
+      if (akris === null) {
+        rowErrors.push({ field: "akris", message: "AKRIS musí být Ano/Ne." });
+      }
+      const callBeforeTraining = parseCsvBoolean(getValue(row, "call_before_training"), false);
+      if (callBeforeTraining === null) {
+        rowErrors.push({
+          field: "call_before_training",
+          message: "Zavolat před tréninkem musí být Ano/Ne.",
+        });
+      }
+
+      const frequencyQuantity = String(getValue(row, "frequency_quantity") || "").trim();
+      const frequencyPeriod = String(getValue(row, "frequency_period") || "").trim();
+
+      const maxDistance = parseCsvNumber(getValue(row, "distance_limit"));
+      if (getValue(row, "distance_limit") && maxDistance === null) {
+        rowErrors.push({ field: "distance_limit", message: "Neplatný limit vzdálenosti." });
+      } else if (maxDistance !== null && maxDistance < 1) {
+        rowErrors.push({ field: "distance_limit", message: "Limit vzdálenosti musí být > 0." });
+      }
+
+      const preferredWeekdays = [];
+      for (const day of weekdayColumns) {
+        const raw = getValue(row, day.key);
+        const parsed = parseCsvBoolean(raw, false);
+        if (raw && parsed === null) {
+          rowErrors.push({
+            field: day.key,
+            message: "Neplatná hodnota pro den v týdnu (použijte Ano/Ne nebo 1/0).",
+          });
+        } else if (parsed) {
+          preferredWeekdays.push(day.value);
+        }
+      }
+
+      const homeLat = parseCsvNumber(getValue(row, "home_lat"));
+      if (getValue(row, "home_lat") && homeLat === null) {
+        rowErrors.push({ field: "home_lat", message: "Neplatná zeměpisná šířka." });
+      }
+      const homeLng = parseCsvNumber(getValue(row, "home_lng"));
+      if (getValue(row, "home_lng") && homeLng === null) {
+        rowErrors.push({ field: "home_lng", message: "Neplatná zeměpisná délka." });
+      }
+
+      const hourlyRate = parseCsvNumber(getValue(row, "hourly_rate"));
+      if (getValue(row, "hourly_rate") && hourlyRate === null) {
+        rowErrors.push({ field: "hourly_rate", message: "Neplatná hodinová sazba." });
+      }
+      const travelRateKm = parseCsvNumber(getValue(row, "travel_rate_km"));
+      if (getValue(row, "travel_rate_km") && travelRateKm === null) {
+        rowErrors.push({ field: "travel_rate_km", message: "Neplatné cestovné." });
+      }
+
+      const limitNote = String(getValue(row, "limit_note") || "").trim();
+      const notes = String(getValue(row, "notes") || "").trim();
+
+      if (rowErrors.length) {
+        errors.push({ row: rowNumber, errors: rowErrors });
+        skipped += 1;
+        continue;
+      }
+
+      if (!dryRun) {
+        let trainer = await prisma.trainer.create({
+          data: {
+            firstName,
+            lastName,
+            titlePrefix,
+            titleSuffix,
+            akris,
+            callBeforeTraining,
+            frequencyQuantity: frequencyQuantity || null,
+            frequencyPeriod: frequencyPeriod || null,
+            limitNote: limitNote || null,
+            email,
+            phone,
+            homeAddress,
+            homeLat,
+            homeLng,
+            hourlyRate,
+            travelRateKm,
+            notes,
+          },
+        });
+
+        const ruleData = [
+          buildRuleData(trainer.id, "max_distance_km", maxDistance),
+          buildRuleData(trainer.id, "preferred_weekdays", preferredWeekdays),
+        ].filter(Boolean);
+
+        if (ruleData.length) {
+          await syncTrainerRelations(trainer.id, [], ruleData);
+        }
+
+        if (trainer.homeLat === null || trainer.homeLng === null) {
+          const geo = await geocodeAddress(trainer.homeAddress);
+          if (geo) {
+            trainer = await prisma.trainer.update({
+              where: { id: trainer.id },
+              data: { homeLat: geo.lat, homeLng: geo.lng },
+            });
+          }
+        }
+      }
+
+      imported += 1;
+    }
+
+    return res.json({
+      dry_run: dryRun,
+      summary: {
+        total_rows: rows.length - 1,
+        imported,
+        skipped,
+        errors: errors.length,
+      },
+      errors,
+    });
   })
 );
 
@@ -600,10 +1003,27 @@ api.post(
     const payload = req.body || {};
     const errors = {};
 
-    const name = (payload.name || "").trim();
-    if (!name) {
-      addError(errors, "name", "This field is required.");
+    const firstName = (payload.first_name || "").trim();
+    if (!firstName) {
+      addError(errors, "first_name", "This field is required.");
     }
+    const lastName = (payload.last_name || "").trim();
+    if (!lastName) {
+      addError(errors, "last_name", "This field is required.");
+    }
+    const titlePrefix = (payload.title_prefix || "").trim();
+    const titleSuffix = (payload.title_suffix || "").trim();
+    const akris = parseBoolean(payload.akris);
+    if (akris === null) {
+      addError(errors, "akris", "Select a valid value.");
+    }
+    const callBeforeTraining = parseBoolean(payload.call_before_training);
+    if (callBeforeTraining === null) {
+      addError(errors, "call_before_training", "Select a valid value.");
+    }
+    const frequencyQuantity = (payload.frequency_quantity || "").trim() || null;
+    const frequencyPeriod = (payload.frequency_period || "").trim() || null;
+    const limitNote = (payload.limit_note || "").trim() || null;
     const homeAddress = (payload.home_address || "").trim();
     if (!homeAddress) {
       addError(errors, "home_address", "This field is required.");
@@ -716,7 +1136,15 @@ api.post(
 
     const trainer = await prisma.trainer.create({
       data: {
-        name,
+        firstName,
+        lastName,
+        titlePrefix,
+        titleSuffix,
+        akris,
+        callBeforeTraining,
+        frequencyQuantity,
+        frequencyPeriod,
+        limitNote,
         email,
         phone,
         homeAddress,
@@ -840,10 +1268,27 @@ api.put(
     const payload = req.body || {};
     const errors = {};
 
-    const name = (payload.name || "").trim();
-    if (!name) {
-      addError(errors, "name", "This field is required.");
+    const firstName = (payload.first_name || "").trim();
+    if (!firstName) {
+      addError(errors, "first_name", "This field is required.");
     }
+    const lastName = (payload.last_name || "").trim();
+    if (!lastName) {
+      addError(errors, "last_name", "This field is required.");
+    }
+    const titlePrefix = (payload.title_prefix || "").trim();
+    const titleSuffix = (payload.title_suffix || "").trim();
+    const akris = parseBoolean(payload.akris);
+    if (akris === null) {
+      addError(errors, "akris", "Select a valid value.");
+    }
+    const callBeforeTraining = parseBoolean(payload.call_before_training);
+    if (callBeforeTraining === null) {
+      addError(errors, "call_before_training", "Select a valid value.");
+    }
+    const frequencyQuantity = (payload.frequency_quantity || "").trim() || null;
+    const frequencyPeriod = (payload.frequency_period || "").trim() || null;
+    const limitNote = (payload.limit_note || "").trim() || null;
     const homeAddress = (payload.home_address || "").trim();
     if (!homeAddress) {
       addError(errors, "home_address", "This field is required.");
@@ -957,7 +1402,15 @@ api.put(
     await prisma.trainer.update({
       where: { id },
       data: {
-        name,
+        firstName,
+        lastName,
+        titlePrefix,
+        titleSuffix,
+        akris,
+        callBeforeTraining,
+        frequencyQuantity,
+        frequencyPeriod,
+        limitNote,
         email,
         phone,
         homeAddress,
@@ -1109,7 +1562,7 @@ api.get(
       nextYear += 1;
     }
 
-    const monthName = new Intl.DateTimeFormat("en-US", {
+    const monthName = new Intl.DateTimeFormat("cs-CZ", {
       month: "long",
       timeZone: config.timeZone,
     }).format(new Date(year, safeMonth - 1, 1));
@@ -1162,7 +1615,7 @@ api.get(
     for (let offset = 0; offset < 7; offset += 1) {
       const day = new Date(weekStart);
       day.setDate(day.getDate() + offset);
-      const weekday = new Intl.DateTimeFormat("en-US", {
+      const weekday = new Intl.DateTimeFormat("cs-CZ", {
         weekday: "short",
         timeZone: config.timeZone,
       }).format(day);

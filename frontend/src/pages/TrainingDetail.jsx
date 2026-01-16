@@ -110,7 +110,7 @@ const TrainingDetail = () => {
   if (loading) {
     return (
       <section className="stack">
-        <p className="muted">Loading training...</p>
+        <p className="muted">Načítání tréninku...</p>
       </section>
     );
   }
@@ -119,10 +119,10 @@ const TrainingDetail = () => {
     return (
       <section className="stack">
         <div className="card">
-          <h2>Training detail</h2>
+          <h2>Detail tréninku</h2>
           <p className="error">{error}</p>
           <Link className="btn" to="/trainings">
-            Back to trainings
+            Zpět na tréninky
           </Link>
         </div>
       </section>
@@ -136,46 +136,50 @@ const TrainingDetail = () => {
   return (
     <section className="stack">
       <PageHeader
-        title={`Training #${training.id}`}
+        title={`Trénink #${training.id}`}
         subtitle={`${training.training_type?.name} / ${new Date(
           training.start_datetime
         ).toLocaleString()}`}
         actions={
           <Link className="btn btn-ghost" to={`/trainings/${training.id}/edit`}>
-            Edit training
+            Upravit trénink
           </Link>
         }
       />
       <div className="grid two">
         <div className="card">
-          <h3>Training detail</h3>
+          <h3>Detail tréninku</h3>
           <div className="detail-list">
             <div>
-              <span className="muted">Customer</span>
+              <span className="muted">Zákazník</span>
               <strong>{training.customer_name || "--"}</strong>
             </div>
             <div>
-              <span className="muted">Address</span>
+              <span className="muted">Adresa</span>
               <strong>{training.address}</strong>
             </div>
             <div>
-              <span className="muted">Lat/Lng</span>
+              <span className="muted">Souřadnice</span>
               <strong>
                 {training.lat ?? "--"}, {training.lng ?? "--"}
               </strong>
             </div>
             <div>
-              <span className="muted">Status</span>
+              <span className="muted">Stav</span>
               <strong>{training.status_label}</strong>
             </div>
             <div>
-              <span className="muted">Trainer</span>
-              <strong>{training.assigned_trainer?.name || "--"}</strong>
+              <span className="muted">Trenér</span>
+              <strong>
+                {training.assigned_trainer?.display_name ||
+                  training.assigned_trainer?.name ||
+                  "--"}
+              </strong>
             </div>
           </div>
-          <h3>Update</h3>
+          <h3>Upravit</h3>
           <form onSubmit={onSubmit} className="stack">
-            <FormField label="Status" htmlFor="status">
+            <FormField label="Stav" htmlFor="status">
               <select id="status" name="status" value={formState.status} onChange={onChange}>
                 {meta.status_choices.map((choice) => (
                   <option key={choice.value} value={choice.value}>
@@ -184,22 +188,22 @@ const TrainingDetail = () => {
                 ))}
               </select>
             </FormField>
-            <FormField label="Assigned trainer" htmlFor="assigned_trainer">
+            <FormField label="Přiřazený trenér" htmlFor="assigned_trainer">
               <select
                 id="assigned_trainer"
                 name="assigned_trainer"
                 value={formState.assigned_trainer}
                 onChange={onChange}
               >
-                <option value="">Unassigned</option>
+                <option value="">Nepřiřazeno</option>
                 {meta.trainer_choices.map((trainer) => (
                   <option key={trainer.id} value={trainer.id}>
-                    {trainer.name}
+                    {trainer.display_name || trainer.name}
                   </option>
                 ))}
               </select>
             </FormField>
-            <FormField label="Customer" htmlFor="customer_name">
+            <FormField label="Zákazník" htmlFor="customer_name">
               <input
                 id="customer_name"
                 name="customer_name"
@@ -207,7 +211,7 @@ const TrainingDetail = () => {
                 onChange={onChange}
               />
             </FormField>
-            <FormField label="Assignment reason" htmlFor="assignment_reason">
+            <FormField label="Důvod přiřazení" htmlFor="assignment_reason">
               <textarea
                 id="assignment_reason"
                 name="assignment_reason"
@@ -215,56 +219,58 @@ const TrainingDetail = () => {
                 onChange={onChange}
               />
             </FormField>
-            <FormField label="Notes" htmlFor="notes">
+            <FormField label="Poznámky" htmlFor="notes">
               <textarea id="notes" name="notes" value={formState.notes} onChange={onChange} />
             </FormField>
             {formError ? <p className="error">{formError}</p> : null}
             <div className="inline-actions">
               <button className="btn" type="submit" disabled={saving}>
-                {saving ? "Saving..." : "Save changes"}
+                {saving ? "Ukládám..." : "Uložit změny"}
               </button>
               <Link className="btn btn-ghost" to="/trainings">
-                Back
+                Zpět
               </Link>
             </div>
           </form>
         </div>
         <div className="card">
-          <h3>Recommended trainers</h3>
+          <h3>Doporučení trenéři</h3>
           {recommendations.used_compromise && recommendations.matches.length ? (
-            <p className="muted">No trainer meets all conditions. Showing compromises.</p>
+            <p className="muted">
+              Žádný trenér nesplňuje všechny podmínky. Zobrazuji kompromisy.
+            </p>
           ) : null}
           {recommendations.matches.length ? (
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Trainer</th>
-                    <th>Score</th>
-                    <th>Cost</th>
-                    <th>Why</th>
+                    <th>Trenér</th>
+                    <th>Skóre</th>
+                    <th>Náklady</th>
+                    <th>Proč</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {recommendations.matches.map((match) => (
                     <tr key={match.trainer.id}>
-                      <td>{match.trainer.name}</td>
+                      <td>{match.trainer.display_name || match.trainer.name}</td>
                       <td>{Math.round(match.score)}</td>
-                      <td>{match.estimated_cost ? `${Math.round(match.estimated_cost)} CZK` : "--"}</td>
+                      <td>{match.estimated_cost ? `${Math.round(match.estimated_cost)} Kč` : "--"}</td>
                       <td>
                         {match.reasons.map((reason) => (
                           <div key={reason}>{reason}</div>
                         ))}
                         {match.warnings.map((warning) => (
                           <div key={warning} className="muted">
-                            Warning: {warning}
+                            Upozornění: {warning}
                           </div>
                         ))}
                       </td>
                       <td>
                         <button className="btn btn-ghost" type="button" onClick={() => onAssign(match)}>
-                          Assign
+                          Přiřadit
                         </button>
                       </td>
                     </tr>
@@ -275,8 +281,8 @@ const TrainingDetail = () => {
           ) : (
             <p className="muted">
               {recommendations.used_compromise
-                ? "No trainer meets the conditions and no close compromise was found."
-                : "No recommendations yet. Add trainers and ensure the address has coordinates."}
+                ? "Žádný trenér nesplňuje podmínky a nenašel se ani blízký kompromis."
+                : "Zatím žádná doporučení. Přidejte trenéry a zkontrolujte, že adresa má souřadnice."}
             </p>
           )}
         </div>

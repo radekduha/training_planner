@@ -4,7 +4,15 @@ import { Link, useParams } from "react-router-dom";
 import { fetchTrainer } from "../api/trainers.js";
 import PageHeader from "../components/PageHeader.jsx";
 
-const weekdayLabels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const weekdayLabels = [
+  "Pondělí",
+  "Úterý",
+  "Středa",
+  "Čtvrtek",
+  "Pátek",
+  "Sobota",
+  "Neděle",
+];
 const weekdayOptions = weekdayLabels.map((label, value) => ({ value, label }));
 
 const formatCzk = (value) => {
@@ -40,10 +48,10 @@ const formatRuleValue = (value) => {
 
 const getRuleDisplay = (rule) => {
   if (rule.type === "max_distance_km") {
-    return { label: "Max distance", value: rule.value, unit: "km" };
+    return { label: "Maximální vzdálenost", value: rule.value, unit: "km" };
   }
   if (rule.type === "max_long_trips_per_month") {
-    return { label: "Max long trips per month", value: rule.value, unit: "trips" };
+    return { label: "Max. počet dlouhých cest za měsíc", value: rule.value, unit: "cest" };
   }
   return { label: rule.label, value: rule.value, unit: "" };
 };
@@ -99,7 +107,7 @@ const TrainerDetail = () => {
   if (loading) {
     return (
       <section className="stack">
-        <p className="muted">Loading trainer...</p>
+        <p className="muted">Načítání trenéra...</p>
       </section>
     );
   }
@@ -108,10 +116,10 @@ const TrainerDetail = () => {
     return (
       <section className="stack">
         <div className="card">
-          <h2>Trainer detail</h2>
+          <h2>Detail trenéra</h2>
           <p className="error">{error}</p>
           <Link className="btn" to="/trainers">
-            Back to trainers
+            Zpět na trenéry
           </Link>
         </div>
       </section>
@@ -134,19 +142,26 @@ const TrainerDetail = () => {
       (rule) => rule.type !== "preferred_weekdays" && rule.type !== "weekend_allowed"
     ) || [];
   const weekendLabel =
-    weekendAllowed === null ? "--" : weekendAllowed ? "Allowed" : "Not allowed";
+    weekendAllowed === null ? "--" : weekendAllowed ? "Povoleno" : "Nepovoleno";
   const weekendClass =
     weekendAllowed === null
       ? "status-pill"
       : weekendAllowed
         ? "status-pill positive"
         : "status-pill negative";
+  const displayName =
+    trainer.display_name ||
+    [trainer.title_prefix, trainer.first_name, trainer.last_name, trainer.title_suffix]
+      .filter(Boolean)
+      .join(" ")
+      .trim() ||
+    trainer.name;
   const ruleSections = [
     {
       key: "weekend",
       content: (
         <div className="rule-status">
-          <span className="detail-label">Weekend allowed</span>
+          <span className="detail-label">Víkendy povoleny</span>
           <span className={weekendClass}>{weekendLabel}</span>
         </div>
       ),
@@ -155,7 +170,7 @@ const TrainerDetail = () => {
       key: "weekdays",
       content: (
         <>
-          <p className="detail-label">Preferred weekdays</p>
+          <p className="detail-label">Preferované dny v týdnu</p>
           <div className="weekday-grid compact">
             {weekdayOptions.map((day) => {
               const isPreferred = preferredWeekdaysSet.has(day.value);
@@ -184,45 +199,87 @@ const TrainerDetail = () => {
   return (
     <section className="stack trainer-detail">
       <PageHeader
-        title={trainer.name}
-        subtitle="Trainer profile and current workload."
+        title={displayName}
+        subtitle="Profil trenéra a aktuální vytížení."
         actions={
           <Link className="btn btn-ghost" to={`/trainers/${trainer.id}/edit`}>
-            Edit trainer
+            Upravit trenéra
           </Link>
         }
       />
       <div className="grid two">
         <div className="stack">
           <div className="card">
-            <h3>Contact</h3>
+            <h3>Profil</h3>
             <div className="detail-list">
               <div className="detail-item">
-                <span className="detail-label">Email</span>
+                <span className="detail-label">Jméno</span>
+                <strong className="detail-value">{trainer.first_name || "--"}</strong>
+              </div>
+              <div className="detail-divider" role="presentation" />
+              <div className="detail-item">
+                <span className="detail-label">Příjmení</span>
+                <strong className="detail-value">{trainer.last_name || "--"}</strong>
+              </div>
+              <div className="detail-divider" role="presentation" />
+              <div className="detail-item">
+                <span className="detail-label">Titul před jménem</span>
+                <strong className="detail-value">{trainer.title_prefix || "--"}</strong>
+              </div>
+              <div className="detail-divider" role="presentation" />
+              <div className="detail-item">
+                <span className="detail-label">Titul za jménem</span>
+                <strong className="detail-value">{trainer.title_suffix || "--"}</strong>
+              </div>
+              <div className="detail-divider" role="presentation" />
+              <div className="detail-item">
+                <span className="detail-label">AKRIS</span>
+                <strong className="detail-value">{trainer.akris ? "Ano" : "Ne"}</strong>
+              </div>
+              <div className="detail-divider" role="presentation" />
+              <div className="detail-item">
+                <span className="detail-label">Zavolat před tréninkem</span>
+                <strong className="detail-value">
+                  {trainer.call_before_training ? "Ano" : "Ne"}
+                </strong>
+              </div>
+              <div className="detail-divider" role="presentation" />
+              <div className="detail-item">
+                <span className="detail-label">Frekvence - hodnota</span>
+                <strong className="detail-value">{trainer.frequency_quantity || "--"}</strong>
+              </div>
+              <div className="detail-divider" role="presentation" />
+              <div className="detail-item">
+                <span className="detail-label">Frekvence - jednotka</span>
+                <strong className="detail-value">{trainer.frequency_period || "--"}</strong>
+              </div>
+              <div className="detail-divider" role="presentation" />
+              <div className="detail-item">
+                <span className="detail-label">E-mail</span>
                 <strong className="detail-value">{trainer.email || "--"}</strong>
               </div>
               <div className="detail-divider" role="presentation" />
               <div className="detail-item">
-                <span className="detail-label">Phone</span>
+                <span className="detail-label">Telefon</span>
                 <strong className="detail-value">{trainer.phone || "--"}</strong>
               </div>
               <div className="detail-divider" role="presentation" />
               <div className="detail-item">
-                <span className="detail-label">Home</span>
+                <span className="detail-label">Bydliště</span>
                 <strong className="detail-value">{trainer.home_address}</strong>
               </div>
             </div>
           </div>
           <div className="card">
-            <h3>Pricing</h3>
+            <h3>Ceník</h3>
             <div className="detail-list two-column">
               <div className="detail-item">
-                <span className="detail-label">Hourly rate</span>
+                <span className="detail-label">Hodinová sazba</span>
                 <strong className="detail-value">{formatCzk(trainer.hourly_rate)}</strong>
               </div>
               <div className="detail-divider" role="presentation" />
               <div className="detail-item">
-                <span className="detail-label">Travel rate</span>
+                <span className="detail-label">Cestovné</span>
                 <strong className="detail-value">
                   {formatCzkPerKm(trainer.travel_rate_km)}
                 </strong>
@@ -230,23 +287,28 @@ const TrainerDetail = () => {
             </div>
           </div>
           <div className="card">
-            <h3>Notes &amp; workload</h3>
+            <h3>Poznámky a vytížení</h3>
             <div className="detail-list">
               <div className="detail-item">
-                <span className="detail-label">Notes</span>
+                <span className="detail-label">Poznámka k limitu</span>
+                <strong className="detail-value">{trainer.limit_note || "--"}</strong>
+              </div>
+              <div className="detail-divider" role="presentation" />
+              <div className="detail-item">
+                <span className="detail-label">Poznámky</span>
                 <strong className="detail-value">{trainer.notes || "--"}</strong>
               </div>
               <div className="detail-divider" role="presentation" />
               <div className="detail-item">
-                <span className="detail-label">Workload this month</span>
+                <span className="detail-label">Vytížení tento měsíc</span>
                 <strong className="detail-value">
-                  {workload.month_workload} trainings, {workload.month_long_trips} long trips
+                  {workload.month_workload} tréninků, {workload.month_long_trips} dlouhých cest
                 </strong>
               </div>
             </div>
           </div>
           <div className="card">
-            <h3>Training types</h3>
+            <h3>Typy tréninků</h3>
             <div className="pill-row">
               {trainer.training_types?.length ? (
                 trainer.training_types.map((type) => (
@@ -255,12 +317,12 @@ const TrainerDetail = () => {
                   </span>
                 ))
               ) : (
-                <p className="muted">No training types assigned.</p>
+                <p className="muted">Žádné typy tréninků nejsou přiřazeny.</p>
               )}
             </div>
           </div>
           <div className="card">
-            <h3>Rules</h3>
+            <h3>Pravidla</h3>
             <div className="rules-stack">
               {ruleSections.map((section, index) => (
                 <div key={section.key} className="rule-section">
@@ -274,15 +336,15 @@ const TrainerDetail = () => {
           </div>
         </div>
         <div className="card">
-          <h3>Assigned trainings</h3>
+          <h3>Přiřazené tréninky</h3>
           {assignedTrainings.length ? (
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Training</th>
-                    <th>Date</th>
-                    <th>Status</th>
+                    <th>Trénink</th>
+                    <th>Datum</th>
+                    <th>Stav</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -303,7 +365,7 @@ const TrainerDetail = () => {
               </table>
             </div>
           ) : (
-            <p className="muted">No trainings assigned yet.</p>
+            <p className="muted">Zatím žádné přiřazené tréninky.</p>
           )}
         </div>
       </div>

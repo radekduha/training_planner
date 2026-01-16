@@ -32,9 +32,9 @@ const CalendarMonth = () => {
     <section className="stack">
       <PageHeader
         title={
-          calendar ? `${calendar.month_name} ${calendar.year}` : "Calendar"
+          calendar ? `${calendar.month_name} ${calendar.year}` : "Kalendář"
         }
-        subtitle="Month view of trainings."
+        subtitle="Měsíční přehled tréninků."
         actions={
           calendar ? (
             <div className="inline-actions">
@@ -43,17 +43,17 @@ const CalendarMonth = () => {
                 type="button"
                 onClick={() => goToMonth(calendar.prev_year, calendar.prev_month)}
               >
-                Prev
+                Předchozí
               </button>
               <button
                 className="btn btn-ghost"
                 type="button"
                 onClick={() => goToMonth(calendar.next_year, calendar.next_month)}
               >
-                Next
+                Další
               </button>
               <Link className="btn" to={`/calendar/week?date=${calendar.today}`}>
-                Week view
+                Týdenní přehled
               </Link>
             </div>
           ) : null
@@ -61,7 +61,7 @@ const CalendarMonth = () => {
       />
       <div className="card">
         {loading ? (
-          <p className="muted">Loading calendar...</p>
+          <p className="muted">Načítání kalendáře...</p>
         ) : error ? (
           <p className="error">{error}</p>
         ) : calendar ? (
@@ -69,13 +69,13 @@ const CalendarMonth = () => {
             <table className="calendar">
               <thead>
                 <tr>
-                  <th>Mon</th>
-                  <th>Tue</th>
-                  <th>Wed</th>
-                  <th>Thu</th>
-                  <th>Fri</th>
-                  <th>Sat</th>
-                  <th>Sun</th>
+                  <th>Po</th>
+                  <th>Út</th>
+                  <th>St</th>
+                  <th>Čt</th>
+                  <th>Pá</th>
+                  <th>So</th>
+                  <th>Ne</th>
                 </tr>
               </thead>
               <tbody>

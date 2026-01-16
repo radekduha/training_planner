@@ -40,12 +40,12 @@ const TrainingTypes = () => {
 
   return (
     <section className="stack">
-      <PageHeader title="Training types" subtitle="Manage training categories." />
+      <PageHeader title="Typy tréninků" subtitle="Spravujte kategorie tréninků." />
       <div className="grid two">
         <div className="card">
-          <h3>Types</h3>
+          <h3>Typy</h3>
           {loading ? (
-            <p className="muted">Loading types...</p>
+            <p className="muted">Načítání typů...</p>
           ) : types.length ? (
             <ul className="list">
               {types.map((type) => (
@@ -53,18 +53,18 @@ const TrainingTypes = () => {
               ))}
             </ul>
           ) : (
-            <p className="muted">No training types yet.</p>
+            <p className="muted">Zatím žádné typy tréninků.</p>
           )}
         </div>
         <div className="card">
-          <h3>Add type</h3>
+          <h3>Přidat typ</h3>
           <form onSubmit={onSubmit} className="stack">
-            <FormField label="Name" htmlFor="name">
+            <FormField label="Název" htmlFor="name">
               <input id="name" value={name} onChange={(event) => setName(event.target.value)} />
             </FormField>
             {error ? <p className="error">{error}</p> : null}
             <button className="btn" type="submit" disabled={saving || !name.trim()}>
-              {saving ? "Saving..." : "Save"}
+              {saving ? "Ukládám..." : "Uložit"}
             </button>
           </form>
         </div>

@@ -70,23 +70,23 @@ const TrainingsList = () => {
   return (
     <section className="stack">
       <PageHeader
-        title="Trainings"
-        subtitle="Filter and review all scheduled trainings."
+        title="Tréninky"
+        subtitle="Filtrujte a prohlížejte všechny plánované tréninky."
         actions={
           <Link className="btn btn-primary" to="/trainings/new">
-            New training
+            Nový trénink
           </Link>
         }
       />
       <div className="grid">
         <div className="card">
-          <h2>Filters</h2>
+          <h2>Filtry</h2>
           <form onSubmit={onSubmit} className="filters-form">
             <div className="filters">
               <div className="field">
-                <label htmlFor="status">Status</label>
+                <label htmlFor="status">Stav</label>
                 <select id="status" name="status" value={filters.status} onChange={onFilterChange}>
-                  <option value="">All</option>
+                  <option value="">Vše</option>
                   {meta.status_choices.map((choice) => (
                     <option key={choice.value} value={choice.value}>
                       {choice.label}
@@ -95,14 +95,14 @@ const TrainingsList = () => {
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="training_type">Training type</label>
+                <label htmlFor="training_type">Typ tréninku</label>
                 <select
                   id="training_type"
                   name="training_type"
                   value={filters.training_type}
                   onChange={onFilterChange}
                 >
-                  <option value="">All</option>
+                  <option value="">Vše</option>
                   {meta.training_types.map((type) => (
                     <option key={type.id} value={type.id}>
                       {type.name}
@@ -111,7 +111,7 @@ const TrainingsList = () => {
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="start_date">Start date</label>
+                <label htmlFor="start_date">Datum od</label>
                 <input
                   id="start_date"
                   name="start_date"
@@ -121,7 +121,7 @@ const TrainingsList = () => {
                 />
               </div>
               <div className="field">
-                <label htmlFor="end_date">End date</label>
+                <label htmlFor="end_date">Datum do</label>
                 <input
                   id="end_date"
                   name="end_date"
@@ -132,10 +132,10 @@ const TrainingsList = () => {
               </div>
               <div className="filters-actions">
                 <button className="btn" type="submit">
-                  Apply
+                  Použít
                 </button>
                 <button className="btn btn-ghost" type="button" onClick={onReset}>
-                  Reset
+                  Resetovat
                 </button>
               </div>
             </div>
@@ -146,13 +146,13 @@ const TrainingsList = () => {
                 checked={filters.no_trainer}
                 onChange={onFilterChange}
               />
-              Without trainer (draft + waiting)
+              Bez trenéra (koncept + čeká)
             </label>
           </form>
         </div>
         <div className="card">
           {loading ? (
-            <p className="muted">Loading trainings...</p>
+            <p className="muted">Načítání tréninků...</p>
           ) : error ? (
             <p className="error">{error}</p>
           ) : trainings.length ? (
@@ -160,12 +160,12 @@ const TrainingsList = () => {
               <table>
                 <thead>
                   <tr>
-                    <th>Type</th>
-                    <th>Customer</th>
-                    <th>Address</th>
-                    <th>When</th>
-                    <th>Status</th>
-                    <th>Trainer</th>
+                    <th>Typ</th>
+                    <th>Zákazník</th>
+                    <th>Adresa</th>
+                    <th>Kdy</th>
+                    <th>Stav</th>
+                    <th>Trenér</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -179,7 +179,11 @@ const TrainingsList = () => {
                       <td>
                         <span className="pill">{training.status_label}</span>
                       </td>
-                      <td>{training.assigned_trainer?.name || "--"}</td>
+                      <td>
+                        {training.assigned_trainer?.display_name ||
+                          training.assigned_trainer?.name ||
+                          "--"}
+                      </td>
                       <td>
                         <Link className="text-link" to={`/trainings/${training.id}`}>
                           Detail
@@ -193,11 +197,11 @@ const TrainingsList = () => {
           ) : (
             <div className="empty-state">
               <div>
-                <h3>No trainings yet</h3>
-                <p>Create the first training to start matching trainers.</p>
+                <h3>Zatím žádné tréninky</h3>
+                <p>Vytvořte první trénink a začněte přiřazovat trenéry.</p>
               </div>
               <Link className="btn" to="/trainings/new">
-                Add training
+                Přidat trénink
               </Link>
             </div>
           )}

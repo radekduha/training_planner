@@ -47,9 +47,9 @@ const TrainingForm = ({ mode }) => {
 
   const pageTitle = useMemo(() => {
     if (isEdit) {
-      return `Edit training #${id}`;
+      return `Upravit trénink #${id}`;
     }
-    return "New training";
+    return "Nový trénink";
   }, [isEdit, id]);
 
   useEffect(() => {
@@ -126,7 +126,7 @@ const TrainingForm = ({ mode }) => {
       if (err.payload?.errors) {
         const mapped = {};
         Object.entries(err.payload.errors).forEach(([key, messages]) => {
-          mapped[key] = messages?.[0]?.message || "Invalid value.";
+          mapped[key] = messages?.[0]?.message || "Neplatná hodnota.";
         });
         setFieldErrors(mapped);
       }
@@ -138,7 +138,7 @@ const TrainingForm = ({ mode }) => {
   if (loading) {
     return (
       <section className="stack">
-        <p className="muted">Loading training...</p>
+        <p className="muted">Načítání tréninku...</p>
       </section>
     );
   }
@@ -147,17 +147,17 @@ const TrainingForm = ({ mode }) => {
     <section className="stack">
       <PageHeader
         title={pageTitle}
-        subtitle="Provide details for matching the right trainer."
+        subtitle="Zadejte údaje pro přiřazení správného trenéra."
         actions={
           isEdit ? (
             <Link className="btn btn-ghost" to={`/trainings/${id}`}>
-              Back to detail
+              Zpět na detail
             </Link>
           ) : null
         }
       />
       <form className="card form" onSubmit={onSubmit}>
-        <FormField label="Training type" htmlFor="training_type" error={fieldErrors.training_type}>
+        <FormField label="Typ tréninku" htmlFor="training_type" error={fieldErrors.training_type}>
           <select
             id="training_type"
             name="training_type"
@@ -165,7 +165,7 @@ const TrainingForm = ({ mode }) => {
             onChange={onChange}
             required
           >
-            <option value="">Select type</option>
+            <option value="">Vyberte typ</option>
             {meta.training_types.map((type) => (
               <option key={type.id} value={type.id}>
                 {type.name}
@@ -173,7 +173,7 @@ const TrainingForm = ({ mode }) => {
             ))}
           </select>
         </FormField>
-        <FormField label="Customer" htmlFor="customer_name" error={fieldErrors.customer_name}>
+        <FormField label="Zákazník" htmlFor="customer_name" error={fieldErrors.customer_name}>
           <input
             id="customer_name"
             name="customer_name"
@@ -181,20 +181,20 @@ const TrainingForm = ({ mode }) => {
             onChange={onChange}
           />
         </FormField>
-        <FormField label="Address" htmlFor="address" error={fieldErrors.address}>
+        <FormField label="Adresa" htmlFor="address" error={fieldErrors.address}>
           <input id="address" name="address" value={formState.address} onChange={onChange} required />
         </FormField>
         <div className="form-grid">
-          <FormField label="Lat" htmlFor="lat" hint="Optional" error={fieldErrors.lat}>
+          <FormField label="Zeměpisná šířka" htmlFor="lat" hint="Volitelné" error={fieldErrors.lat}>
             <input id="lat" name="lat" value={formState.lat} onChange={onChange} />
           </FormField>
-          <FormField label="Lng" htmlFor="lng" hint="Optional" error={fieldErrors.lng}>
+          <FormField label="Zeměpisná délka" htmlFor="lng" hint="Volitelné" error={fieldErrors.lng}>
             <input id="lng" name="lng" value={formState.lng} onChange={onChange} />
           </FormField>
         </div>
-        <p className="hint">Add coordinates if you have them to improve recommendations.</p>
+        <p className="hint">Pokud je máte, přidejte souřadnice pro lepší doporučení.</p>
         <div className="form-grid">
-          <FormField label="Start" htmlFor="start_datetime" error={fieldErrors.start_datetime}>
+          <FormField label="Začátek" htmlFor="start_datetime" error={fieldErrors.start_datetime}>
             <input
               id="start_datetime"
               name="start_datetime"
@@ -204,7 +204,7 @@ const TrainingForm = ({ mode }) => {
               required
             />
           </FormField>
-          <FormField label="End" htmlFor="end_datetime" error={fieldErrors.end_datetime}>
+          <FormField label="Konec" htmlFor="end_datetime" error={fieldErrors.end_datetime}>
             <input
               id="end_datetime"
               name="end_datetime"
@@ -215,7 +215,7 @@ const TrainingForm = ({ mode }) => {
             />
           </FormField>
         </div>
-        <FormField label="Status" htmlFor="status" error={fieldErrors.status}>
+        <FormField label="Stav" htmlFor="status" error={fieldErrors.status}>
           <select id="status" name="status" value={formState.status} onChange={onChange}>
             {meta.status_choices.map((choice) => (
               <option key={choice.value} value={choice.value}>
@@ -224,25 +224,29 @@ const TrainingForm = ({ mode }) => {
             ))}
           </select>
         </FormField>
-        <FormField label="Assigned trainer" htmlFor="assigned_trainer">
+        <FormField label="Přiřazený trenér" htmlFor="assigned_trainer">
           <select
             id="assigned_trainer"
             name="assigned_trainer"
             value={formState.assigned_trainer}
             onChange={onChange}
           >
-            <option value="">Unassigned</option>
+            <option value="">Nepřiřazeno</option>
             {meta.trainer_choices.map((trainer) => (
               <option key={trainer.id} value={trainer.id}>
-                {trainer.name}
+                {trainer.display_name || trainer.name}
               </option>
             ))}
           </select>
         </FormField>
-        <FormField label="Notes" htmlFor="notes" error={fieldErrors.notes}>
+        <FormField label="Poznámky" htmlFor="notes" error={fieldErrors.notes}>
           <textarea id="notes" name="notes" value={formState.notes} onChange={onChange} />
         </FormField>
-        <FormField label="Assignment reason" htmlFor="assignment_reason" error={fieldErrors.assignment_reason}>
+        <FormField
+          label="Důvod přiřazení"
+          htmlFor="assignment_reason"
+          error={fieldErrors.assignment_reason}
+        >
           <textarea
             id="assignment_reason"
             name="assignment_reason"
@@ -253,10 +257,10 @@ const TrainingForm = ({ mode }) => {
         {formError ? <p className="error">{formError}</p> : null}
         <div className="inline-actions">
           <button className="btn" type="submit" disabled={saving}>
-            {saving ? "Saving..." : isEdit ? "Save changes" : "Save training"}
+            {saving ? "Ukládám..." : isEdit ? "Uložit změny" : "Uložit trénink"}
           </button>
           <Link className="btn btn-ghost" to={isEdit ? `/trainings/${id}` : "/trainings"}>
-            Cancel
+            Zrušit
           </Link>
         </div>
       </form>

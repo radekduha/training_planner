@@ -9,3 +9,6 @@ export const createTrainer = (payload) =>
 
 export const updateTrainer = (id, payload) =>
   requestJson(`/trainers/${id}/`, { method: "PUT", body: payload });
+
+export const importTrainers = (payload) =>
+  requestJson("/trainers/import/", { method: "POST", body: payload });

@@ -35,11 +35,11 @@ const Login = () => {
   return (
     <div className="login-page">
       <div className="card login-card">
-        <h1>Sign in</h1>
-        <p className="muted">Use your Training Planner credentials.</p>
+        <h1>Přihlášení</h1>
+        <p className="muted">Použijte přihlašovací údaje do Training Planneru.</p>
         <form onSubmit={onSubmit} className="stack">
           <div className="field">
-            <label htmlFor="username">Username</label>
+            <label htmlFor="username">Uživatelské jméno</label>
             <input
               id="username"
               name="username"
@@ -50,7 +50,7 @@ const Login = () => {
             />
           </div>
           <div className="field">
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">Heslo</label>
             <input
               id="password"
               name="password"
@@ -63,7 +63,7 @@ const Login = () => {
           </div>
           {error ? <p className="error">{error}</p> : null}
           <button className="btn" type="submit" disabled={loading}>
-            {loading ? "Signing in..." : "Login"}
+            {loading ? "Přihlašuji..." : "Přihlásit"}
           </button>
         </form>
       </div>

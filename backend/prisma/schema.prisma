@@ -18,7 +18,15 @@ model TrainingType {
 
 model Trainer {
   id             Int           @id @default(autoincrement())
-  name           String
+  titlePrefix    String?
+  firstName      String
+  lastName       String        @default("")
+  titleSuffix    String?
+  akris          Boolean       @default(false)
+  callBeforeTraining Boolean   @default(false)
+  frequencyQuantity String?
+  frequencyPeriod String?
+  limitNote     String?
   email          String?
   phone          String?
   homeAddress    String

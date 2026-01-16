@@ -1,16 +1,16 @@
 const TRAINING_STATUS_LABELS = {
-  draft: "Draft",
-  waiting: "Waiting for trainer",
-  assigned: "Assigned",
-  confirmed: "Confirmed",
-  canceled: "Canceled",
+  draft: "Koncept",
+  waiting: "Čeká na trenéra",
+  assigned: "Přiřazeno",
+  confirmed: "Potvrzeno",
+  canceled: "Zrušeno",
 };
 
 const TRAINER_RULE_LABELS = {
-  max_distance_km: "Max distance (km)",
-  weekend_allowed: "Weekend allowed",
-  max_long_trips_per_month: "Max long trips per month",
-  preferred_weekdays: "Preferred weekdays",
+  max_distance_km: "Maximální vzdálenost (km)",
+  weekend_allowed: "Víkendy povoleny",
+  max_long_trips_per_month: "Maximální počet dlouhých cest za měsíc",
+  preferred_weekdays: "Preferované dny v týdnu",
 };
 
 const statusChoices = () =>
@@ -37,15 +37,42 @@ const trainingTypePayload = (trainingType) => ({
   name: trainingType.name,
 });
 
+const trainerFullName = (trainer) => {
+  const parts = [trainer.firstName, trainer.lastName]
+    .map((part) => (part || "").trim())
+    .filter(Boolean);
+  return parts.join(" ").trim();
+};
+
+const trainerDisplayName = (trainer) => {
+  const fullName = trainerFullName(trainer);
+  const parts = [trainer.titlePrefix, fullName, trainer.titleSuffix]
+    .map((part) => (part || "").trim())
+    .filter(Boolean);
+  return parts.join(" ") || fullName || trainer.firstName || trainer.lastName || "";
+};
+
 const trainerSummary = (trainer) => ({
   id: trainer.id,
-  name: trainer.name,
+  name: trainerFullName(trainer),
+  display_name: trainerDisplayName(trainer),
 });
 
 const trainerPayload = (trainer, detail = false) => {
+  const fullName = trainerFullName(trainer);
   const payload = {
     id: trainer.id,
-    name: trainer.name,
+    name: fullName,
+    first_name: trainer.firstName || "",
+    last_name: trainer.lastName || "",
+    title_prefix: trainer.titlePrefix || "",
+    title_suffix: trainer.titleSuffix || "",
+    display_name: trainerDisplayName(trainer),
+    akris: trainer.akris,
+    call_before_training: trainer.callBeforeTraining,
+    frequency_quantity: trainer.frequencyQuantity || "",
+    frequency_period: trainer.frequencyPeriod || "",
+    limit_note: trainer.limitNote || "",
     email: trainer.email || "",
     phone: trainer.phone || "",
     home_address: trainer.homeAddress,

@@ -3,10 +3,10 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { requestJson } from "../api/client.js";
 
 const navItems = [
-  { to: "/", label: "Overview" },
-  { to: "/trainings", label: "Trainings" },
-  { to: "/trainers", label: "Trainers" },
-  { to: "/training-types", label: "Training types" },
+  { to: "/", label: "Přehled" },
+  { to: "/trainings", label: "Tréninky" },
+  { to: "/trainers", label: "Trenéři" },
+  { to: "/training-types", label: "Typy tréninků" },
 ];
 
 const CalendarIcon = () => (
@@ -18,11 +18,11 @@ const CalendarIcon = () => (
   </svg>
 );
 
-const utilityItems = [{ to: "/calendar", label: "Calendar", icon: CalendarIcon }];
+const utilityItems = [{ to: "/calendar", label: "Kalendář", icon: CalendarIcon }];
 
 const actionItems = [
-  { to: "/trainings/new", label: "Create training" },
-  { to: "/trainers/new", label: "Create trainer" },
+  { to: "/trainings/new", label: "Vytvořit trénink" },
+  { to: "/trainers/new", label: "Vytvořit trenéra" },
 ];
 
 const Layout = () => {
@@ -45,7 +45,7 @@ const Layout = () => {
           <div className="brand-mark">TP</div>
           <div>
             <div className="brand-title">Training Planner</div>
-            <div className="brand-subtitle">Fast planning across the Czech Republic</div>
+            <div className="brand-subtitle">Rychlé plánování po celé České republice</div>
           </div>
         </div>
         <nav className="app-nav">
@@ -97,7 +97,7 @@ const Layout = () => {
             ))}
           </div>
           <button className="nav-link nav-link-button" type="button" onClick={onLogout}>
-            Log out
+            Odhlásit se
           </button>
         </div>
       </header>

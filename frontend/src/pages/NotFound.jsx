@@ -4,10 +4,10 @@ const NotFound = () => {
   return (
     <section className="stack">
       <div className="card">
-        <h1>Page not found</h1>
-        <p className="muted">The requested page does not exist yet.</p>
+        <h1>Stránka nenalezena</h1>
+        <p className="muted">Požadovaná stránka zatím neexistuje.</p>
         <Link className="btn" to="/">
-          Go to trainings
+          Přejít na tréninky
         </Link>
       </div>
     </section>

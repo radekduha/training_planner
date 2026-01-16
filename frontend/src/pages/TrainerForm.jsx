@@ -7,17 +7,25 @@ import FormField from "../components/FormField.jsx";
 import PageHeader from "../components/PageHeader.jsx";
 
 const weekdays = [
-  { value: "0", label: "Monday" },
-  { value: "1", label: "Tuesday" },
-  { value: "2", label: "Wednesday" },
-  { value: "3", label: "Thursday" },
-  { value: "4", label: "Friday" },
-  { value: "5", label: "Saturday" },
-  { value: "6", label: "Sunday" },
+  { value: "0", label: "Pondělí" },
+  { value: "1", label: "Úterý" },
+  { value: "2", label: "Středa" },
+  { value: "3", label: "Čtvrtek" },
+  { value: "4", label: "Pátek" },
+  { value: "5", label: "Sobota" },
+  { value: "6", label: "Neděle" },
 ];
 
 const emptyForm = {
-  name: "",
+  first_name: "",
+  last_name: "",
+  title_prefix: "",
+  title_suffix: "",
+  akris: "false",
+  call_before_training: "false",
+  frequency_quantity: "",
+  frequency_period: "",
+  limit_note: "",
   email: "",
   phone: "",
   home_address: "",
@@ -55,9 +63,9 @@ const TrainerForm = ({ mode }) => {
 
   const pageTitle = useMemo(() => {
     if (isEdit) {
-      return `Edit trainer #${id}`;
+      return `Upravit trenéra #${id}`;
     }
-    return "New trainer";
+    return "Nový trenér";
   }, [isEdit, id]);
 
   useEffect(() => {
@@ -75,7 +83,15 @@ const TrainerForm = ({ mode }) => {
       .then((data) => {
         const item = data.item;
         setFormState({
-          name: item.name || "",
+          first_name: item.first_name || "",
+          last_name: item.last_name || "",
+          title_prefix: item.title_prefix || "",
+          title_suffix: item.title_suffix || "",
+          akris: item.akris ? "true" : "false",
+          call_before_training: item.call_before_training ? "true" : "false",
+          frequency_quantity: item.frequency_quantity || "",
+          frequency_period: item.frequency_period || "",
+          limit_note: item.limit_note || "",
           email: item.email || "",
           phone: item.phone || "",
           home_address: item.home_address || "",
@@ -131,7 +147,15 @@ const TrainerForm = ({ mode }) => {
     setFormError(null);
     setFieldErrors({});
     const payload = {
-      name: formState.name,
+      first_name: formState.first_name,
+      last_name: formState.last_name,
+      title_prefix: formState.title_prefix,
+      title_suffix: formState.title_suffix,
+      akris: formState.akris === "true",
+      call_before_training: formState.call_before_training === "true",
+      frequency_quantity: formState.frequency_quantity,
+      frequency_period: formState.frequency_period,
+      limit_note: formState.limit_note,
       email: formState.email,
       phone: formState.phone,
       home_address: formState.home_address,
@@ -160,7 +184,7 @@ const TrainerForm = ({ mode }) => {
       if (err.payload?.errors) {
         const mapped = {};
         Object.entries(err.payload.errors).forEach(([key, messages]) => {
-          mapped[key] = messages?.[0]?.message || "Invalid value.";
+          mapped[key] = messages?.[0]?.message || "Neplatná hodnota.";
         });
         setFieldErrors(mapped);
       }
@@ -172,7 +196,7 @@ const TrainerForm = ({ mode }) => {
   if (loading) {
     return (
       <section className="stack">
-        <p className="muted">Loading trainer...</p>
+        <p className="muted">Načítání trenéra...</p>
       </section>
     );
   }
@@ -181,28 +205,126 @@ const TrainerForm = ({ mode }) => {
     <section className="stack">
       <PageHeader
         title={pageTitle}
-        subtitle="Capture trainer details and constraints."
+        subtitle="Zadejte údaje a omezení trenéra."
         actions={
           isEdit ? (
             <Link className="btn btn-ghost" to={`/trainers/${id}`}>
-              Back to detail
+              Zpět na detail
             </Link>
           ) : null
         }
       />
       <form className="card form" onSubmit={onSubmit}>
-        <FormField label="Name" htmlFor="name" error={fieldErrors.name}>
-          <input id="name" name="name" value={formState.name} onChange={onChange} required />
-        </FormField>
         <div className="form-grid">
-          <FormField label="Email" htmlFor="email" error={fieldErrors.email}>
+          <FormField label="Jméno" htmlFor="first_name" error={fieldErrors.first_name}>
+            <input
+              id="first_name"
+              name="first_name"
+              value={formState.first_name}
+              onChange={onChange}
+              required
+            />
+          </FormField>
+          <FormField label="Příjmení" htmlFor="last_name" error={fieldErrors.last_name}>
+            <input
+              id="last_name"
+              name="last_name"
+              value={formState.last_name}
+              onChange={onChange}
+              required
+            />
+          </FormField>
+        </div>
+        <div className="form-grid">
+          <FormField
+            label="Titul před jménem"
+            htmlFor="title_prefix"
+            hint="Volitelné"
+            error={fieldErrors.title_prefix}
+          >
+            <input
+              id="title_prefix"
+              name="title_prefix"
+              value={formState.title_prefix}
+              onChange={onChange}
+            />
+          </FormField>
+          <FormField
+            label="Titul za jménem"
+            htmlFor="title_suffix"
+            hint="Volitelné"
+            error={fieldErrors.title_suffix}
+          >
+            <input
+              id="title_suffix"
+              name="title_suffix"
+              value={formState.title_suffix}
+              onChange={onChange}
+            />
+          </FormField>
+        </div>
+        <div className="form-grid">
+          <FormField label="AKRIS" htmlFor="akris" error={fieldErrors.akris}>
+            <select id="akris" name="akris" value={formState.akris} onChange={onChange}>
+              <option value="true">Ano</option>
+              <option value="false">Ne</option>
+            </select>
+          </FormField>
+          <FormField
+            label="Zavolat před tréninkem"
+            htmlFor="call_before_training"
+            error={fieldErrors.call_before_training}
+          >
+            <select
+              id="call_before_training"
+              name="call_before_training"
+              value={formState.call_before_training}
+              onChange={onChange}
+            >
+              <option value="true">Ano</option>
+              <option value="false">Ne</option>
+            </select>
+          </FormField>
+        </div>
+        <div className="form-grid">
+          <FormField
+            label="Frekvence - hodnota"
+            htmlFor="frequency_quantity"
+            error={fieldErrors.frequency_quantity}
+          >
+            <input
+              id="frequency_quantity"
+              name="frequency_quantity"
+              value={formState.frequency_quantity}
+              onChange={onChange}
+            />
+          </FormField>
+          <FormField
+            label="Frekvence - jednotka"
+            htmlFor="frequency_period"
+            error={fieldErrors.frequency_period}
+          >
+            <input
+              id="frequency_period"
+              name="frequency_period"
+              value={formState.frequency_period}
+              onChange={onChange}
+            />
+          </FormField>
+        </div>
+        <div className="form-grid">
+          <FormField label="E-mail" htmlFor="email" error={fieldErrors.email}>
             <input id="email" name="email" value={formState.email} onChange={onChange} />
           </FormField>
-          <FormField label="Phone" htmlFor="phone" error={fieldErrors.phone}>
+          <FormField label="Telefon" htmlFor="phone" error={fieldErrors.phone}>
             <input id="phone" name="phone" value={formState.phone} onChange={onChange} />
           </FormField>
         </div>
-        <FormField label="Home address" htmlFor="home_address" error={fieldErrors.home_address}>
+        <FormField
+          label="Adresa bydliště"
+          htmlFor="home_address"
+          error={fieldErrors.home_address}
+        >
           <input
             id="home_address"
             name="home_address"
@@ -212,15 +334,29 @@ const TrainerForm = ({ mode }) => {
           />
         </FormField>
         <div className="form-grid">
-          <FormField label="Home lat" htmlFor="home_lat" hint="Optional" error={fieldErrors.home_lat}>
+          <FormField
+            label="Zeměpisná šířka"
+            htmlFor="home_lat"
+            hint="Volitelné"
+            error={fieldErrors.home_lat}
+          >
             <input id="home_lat" name="home_lat" value={formState.home_lat} onChange={onChange} />
           </FormField>
-          <FormField label="Home lng" htmlFor="home_lng" hint="Optional" error={fieldErrors.home_lng}>
+          <FormField
+            label="Zeměpisná délka"
+            htmlFor="home_lng"
+            hint="Volitelné"
+            error={fieldErrors.home_lng}
+          >
             <input id="home_lng" name="home_lng" value={formState.home_lng} onChange={onChange} />
           </FormField>
         </div>
         <div className="form-grid">
-          <FormField label="Hourly rate (CZK)" htmlFor="hourly_rate" error={fieldErrors.hourly_rate}>
+          <FormField
+            label="Hodinová sazba (Kč)"
+            htmlFor="hourly_rate"
+            error={fieldErrors.hourly_rate}
+          >
             <input
               id="hourly_rate"
               name="hourly_rate"
@@ -228,7 +364,11 @@ const TrainerForm = ({ mode }) => {
               onChange={onChange}
             />
           </FormField>
-          <FormField label="Travel rate (CZK/km)" htmlFor="travel_rate_km" error={fieldErrors.travel_rate_km}>
+          <FormField
+            label="Cestovné (Kč/km)"
+            htmlFor="travel_rate_km"
+            error={fieldErrors.travel_rate_km}
+          >
             <input
               id="travel_rate_km"
               name="travel_rate_km"
@@ -237,10 +377,18 @@ const TrainerForm = ({ mode }) => {
             />
           </FormField>
         </div>
-        <FormField label="Notes" htmlFor="notes" error={fieldErrors.notes}>
+        <FormField label="Poznámka k limitu" htmlFor="limit_note" error={fieldErrors.limit_note}>
+          <textarea
+            id="limit_note"
+            name="limit_note"
+            value={formState.limit_note}
+            onChange={onChange}
+          />
+        </FormField>
+        <FormField label="Poznámky" htmlFor="notes" error={fieldErrors.notes}>
           <textarea id="notes" name="notes" value={formState.notes} onChange={onChange} />
         </FormField>
-        <h3>Training types</h3>
+        <h3>Typy tréninků</h3>
         <div className="chip-grid">
           {trainingTypes.map((type) => (
             <label className="chip" key={type.id}>
@@ -253,9 +401,9 @@ const TrainerForm = ({ mode }) => {
             </label>
           ))}
         </div>
-        <h3>Rules</h3>
+        <h3>Pravidla</h3>
         <FormField
-          label="Max distance (km)"
+          label="Maximální vzdálenost (km)"
           htmlFor="max_distance_km"
           error={fieldErrors.max_distance_km}
         >
@@ -273,10 +421,10 @@ const TrainerForm = ({ mode }) => {
             checked={formState.weekend_allowed}
             onChange={onChange}
           />
-          Weekend allowed
+          Víkendy povoleny
         </label>
         <FormField
-          label="Max long trips per month"
+          label="Maximální počet dlouhých cest za měsíc"
           htmlFor="max_long_trips_per_month"
           error={fieldErrors.max_long_trips_per_month}
         >
@@ -287,7 +435,7 @@ const TrainerForm = ({ mode }) => {
             onChange={onChange}
           />
         </FormField>
-        <h3>Preferred weekdays</h3>
+        <h3>Preferované dny v týdnu</h3>
         <div className="chip-grid">
           {weekdays.map((day) => (
             <label className="chip" key={day.value}>
@@ -303,10 +451,10 @@ const TrainerForm = ({ mode }) => {
         {formError ? <p className="error">{formError}</p> : null}
         <div className="inline-actions">
           <button className="btn" type="submit" disabled={saving}>
-            {saving ? "Saving..." : isEdit ? "Save changes" : "Save trainer"}
+            {saving ? "Ukládám..." : isEdit ? "Uložit změny" : "Uložit trenéra"}
           </button>
           <Link className="btn btn-ghost" to={isEdit ? `/trainers/${id}` : "/trainers"}>
-            Cancel
+            Zrušit
           </Link>
         </div>
       </form>

@@ -27,19 +27,19 @@ const CalendarWeek = () => {
   return (
     <section className="stack">
       <PageHeader
-        title={calendar ? `Week of ${calendar.week_start}` : "Week view"}
-        subtitle="Focused view of the current week."
+        title={calendar ? `Týden od ${calendar.week_start}` : "Týdenní přehled"}
+        subtitle="Přehled aktuálního týdne."
         actions={
           calendar ? (
             <div className="inline-actions">
               <button className="btn btn-ghost" type="button" onClick={() => goToDate(calendar.prev_date)}>
-                Prev
+                Předchozí
               </button>
               <button className="btn btn-ghost" type="button" onClick={() => goToDate(calendar.next_date)}>
-                Next
+                Další
               </button>
               <Link className="btn" to="/calendar">
-                Month view
+                Měsíční přehled
               </Link>
             </div>
           ) : null
@@ -47,7 +47,7 @@ const CalendarWeek = () => {
       />
       <div className="card">
         {loading ? (
-          <p className="muted">Loading week...</p>
+          <p className="muted">Načítání týdne...</p>
         ) : error ? (
           <p className="error">{error}</p>
         ) : calendar ? (
