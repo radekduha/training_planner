@@ -10,6 +10,7 @@ coverage/
 node_modules/
 dist/
 build/
+tmp/
 
 .DS_Store
 .idea/
