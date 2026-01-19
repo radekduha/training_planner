@@ -76,6 +76,23 @@ model Training {
   assignmentReason String?
   googleEventId    String?
   notes            String?
+  visitors         Int?
+  accreditation    Boolean?
+  hours            Int?
+  trainersFee      Float?
+  priceWithVat     Float?
+  payerAddress     String?
+  payerId          String?
+  invoiceNumber    String?
+  trainingPlace    String?
+  contactName      String?
+  contactPhone     String?
+  invoiceEmail     String?
+  approvalEmail    String?
+  studyMaterials   String?
+  infoForTheTrainer String?
+  pp               String?
+  d                String?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
   trainingType     TrainingType @relation(fields: [trainingTypeId], references: [id], onDelete: Restrict)

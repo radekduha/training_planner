@@ -22,3 +22,6 @@ export const updateTraining = (id, payload) =>
 
 export const patchTraining = (id, payload) =>
   requestJson(`/trainings/${id}/`, { method: "PATCH", body: payload });
+
+export const importTrainings = (payload) =>
+  requestJson("/trainings/import/", { method: "POST", body: payload });

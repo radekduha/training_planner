@@ -7,7 +7,7 @@ const NotFound = () => {
         <h1>Stránka nenalezena</h1>
         <p className="muted">Požadovaná stránka zatím neexistuje.</p>
         <Link className="btn" to="/">
-          Přejít na tréninky
+          Přejít na školení
         </Link>
       </div>
     </section>

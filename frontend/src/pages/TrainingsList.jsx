@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { fetchMeta } from "../api/meta.js";
-import { fetchTrainings } from "../api/trainings.js";
+import { fetchTrainings, importTrainings } from "../api/trainings.js";
 import PageHeader from "../components/PageHeader.jsx";
 
 const emptyFilters = {
@@ -19,6 +19,12 @@ const TrainingsList = () => {
   const [trainings, setTrainings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [importFile, setImportFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState(null);
+  const [importResult, setImportResult] = useState(null);
+  const [dryRun, setDryRun] = useState(true);
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
   const loadTrainings = async (activeFilters) => {
     setLoading(true);
@@ -49,6 +55,35 @@ const TrainingsList = () => {
     loadTrainings(emptyFilters);
   }, []);
 
+  const onFileChange = (event) => {
+    const file = event.target.files?.[0] || null;
+    setImportFile(file);
+    setImportError(null);
+    setImportResult(null);
+  };
+
+  const onImport = async () => {
+    if (!importFile) {
+      setImportError("Vyberte CSV soubor.");
+      return;
+    }
+    setImporting(true);
+    setImportError(null);
+    setImportResult(null);
+    try {
+      const csv = await importFile.text();
+      const data = await importTrainings({ csv, dry_run: dryRun });
+      setImportResult(data);
+      if (!dryRun && data.summary?.imported) {
+        loadTrainings(filters);
+      }
+    } catch (err) {
+      setImportError(err.message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const onFilterChange = (event) => {
     const { name, value, type, checked } = event.target;
     setFilters((prev) => ({
@@ -70,14 +105,101 @@ const TrainingsList = () => {
   return (
     <section className="stack">
       <PageHeader
-        title="Tréninky"
-        subtitle="Filtrujte a prohlížejte všechny plánované tréninky."
+        title="Školení"
+        subtitle="Filtrujte a prohlížejte všechna plánovaná školení."
         actions={
-          <Link className="btn btn-primary" to="/trainings/new">
-            Nový trénink
-          </Link>
+          <>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={() => setIsImportOpen(true)}
+            >
+              CSV import
+            </button>
+            <Link className="btn btn-primary" to="/trainings/new">
+              Nové školení
+            </Link>
+          </>
         }
       />
+      {isImportOpen ? (
+        <div
+          className="modal-overlay"
+          role="presentation"
+          onClick={() => setIsImportOpen(false)}
+        >
+          <div
+            className="modal card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="csv-import-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3 id="csv-import-title">Import školení (CSV)</h3>
+              <button
+                className="btn btn-ghost btn-icon"
+                type="button"
+                onClick={() => setIsImportOpen(false)}
+                aria-label="Zavřít"
+              >
+                x
+              </button>
+            </div>
+            <p className="muted">
+              Povinné sloupce: start_date, training_name, start_time, end_time. Místo školení
+              vyplňte přes training_place nebo payer_address. Ostatní sloupce jsou volitelné.
+            </p>
+            <div className="stack">
+              <input type="file" accept=".csv,text/csv" onChange={onFileChange} />
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={dryRun}
+                  onChange={(event) => setDryRun(event.target.checked)}
+                />
+                Pouze kontrola (bez uložení)
+              </label>
+              <button className="btn" type="button" onClick={onImport} disabled={importing}>
+                {importing ? "Importuji..." : "Importovat"}
+              </button>
+            </div>
+            {importError ? <p className="error">{importError}</p> : null}
+            {importResult ? (
+              <div className="stack">
+                <p className="muted">
+                  {importResult.dry_run ? "Kontrola dokončena." : "Import dokončen."}
+                </p>
+                <div className="pill-row">
+                  <span className="pill">Řádků: {importResult.summary?.total_rows ?? 0}</span>
+                  <span className="pill">
+                    Importováno: {importResult.summary?.imported ?? 0}
+                  </span>
+                  <span className="pill">
+                    Přeskočeno: {importResult.summary?.skipped ?? 0}
+                  </span>
+                  <span className="pill">Chyby: {importResult.summary?.errors ?? 0}</span>
+                </div>
+                {importResult.errors?.length ? (
+                  <div className="error">
+                    {importResult.errors.slice(0, 10).map((item) => (
+                      <div key={`row-${item.row}`}>
+                        Řádek {item.row}:{" "}
+                        {(item.errors || [])
+                          .map((err) => `${err.field}: ${err.message}`)
+                          .join(", ")}
+                      </div>
+                    ))}
+                    {importResult.errors.length > 10 ? (
+                      <div>Další chyby: {importResult.errors.length - 10}</div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       <div className="grid">
         <div className="card">
           <h2>Filtry</h2>
@@ -95,7 +217,7 @@ const TrainingsList = () => {
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="training_type">Typ tréninku</label>
+                <label htmlFor="training_type">Typ školení</label>
                 <select
                   id="training_type"
                   name="training_type"
@@ -152,7 +274,7 @@ const TrainingsList = () => {
         </div>
         <div className="card">
           {loading ? (
-            <p className="muted">Načítání tréninků...</p>
+            <p className="muted">Načítání školení...</p>
           ) : error ? (
             <p className="error">{error}</p>
           ) : trainings.length ? (
@@ -197,11 +319,11 @@ const TrainingsList = () => {
           ) : (
             <div className="empty-state">
               <div>
-                <h3>Zatím žádné tréninky</h3>
-                <p>Vytvořte první trénink a začněte přiřazovat trenéry.</p>
+                <h3>Zatím žádná školení</h3>
+                <p>Vytvořte první školení a začněte přiřazovat trenéry.</p>
               </div>
               <Link className="btn" to="/trainings/new">
-                Přidat trénink
+                Přidat školení
               </Link>
             </div>
           )}

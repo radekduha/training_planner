@@ -79,10 +79,10 @@ const Overview = () => {
     <section className="stack">
       <PageHeader
         title="Přehled"
-        subtitle="Nejdůležitější signály z vašeho tréninkového procesu."
+        subtitle="Nejdůležitější signály z vašeho procesu školení."
         actions={
           <Link className="btn btn-ghost" to="/trainings">
-            Zobrazit tréninky
+            Zobrazit školení
           </Link>
         }
       />
@@ -108,14 +108,14 @@ const Overview = () => {
           <div className="stat-meta">Aktivní profily</div>
         </div>
         <div className="card stat-card">
-          <div className="stat-label">Typy tréninků</div>
+          <div className="stat-label">Typy školení</div>
           <div className="stat-value">{showPlaceholder ? "--" : stats.types}</div>
           <div className="stat-meta">Kategorie</div>
         </div>
       </div>
       <div className="grid two">
         <div className="card">
-          <h2>Nadcházející tréninky</h2>
+          <h2>Nadcházející školení</h2>
           {loading ? (
             <p className="muted">Načítání přehledu...</p>
           ) : error ? (
@@ -127,7 +127,7 @@ const Overview = () => {
                   <li key={training.id} className="overview-item">
                     <div>
                       <div className="overview-item-title">
-                        {training.training_type?.name || "Trénink"}
+                        {training.training_type?.name || "Školení"}
                       </div>
                       <div className="muted">
                         {new Date(training.start_datetime).toLocaleString()} -{" "}
@@ -145,12 +145,12 @@ const Overview = () => {
               </ul>
               {stats.week > lists.upcoming.length ? (
                 <Link className="text-link" to="/trainings">
-                  Zobrazit všechny nadcházející tréninky
+                  Zobrazit všechna nadcházející školení
                 </Link>
               ) : null}
             </>
           ) : (
-            <p className="muted">V příštích 7 dnech nejsou žádné tréninky.</p>
+            <p className="muted">V příštích 7 dnech nejsou žádná školení.</p>
           )}
         </div>
         <div className="card">
@@ -166,7 +166,7 @@ const Overview = () => {
                   <li key={training.id} className="overview-item">
                     <div>
                       <div className="overview-item-title">
-                        {training.training_type?.name || "Trénink"}
+                        {training.training_type?.name || "Školení"}
                       </div>
                       <div className="muted">
                         {new Date(training.start_datetime).toLocaleString()} -{" "}
@@ -184,7 +184,7 @@ const Overview = () => {
               </ul>
               {stats.unassigned > lists.needsTrainer.length ? (
                 <Link className="text-link" to="/trainings">
-                  Zkontrolovat nepřiřazené tréninky
+                  Zkontrolovat nepřiřazená školení
                 </Link>
               ) : null}
             </>
@@ -198,7 +198,7 @@ const Overview = () => {
         <p className="muted">Udržujte tempo několika kliknutími.</p>
         <div className="overview-actions">
           <Link className="btn" to="/trainings/new">
-            Vytvořit trénink
+            Vytvořit školení
           </Link>
           <Link className="btn btn-ghost" to="/trainers/new">
             Vytvořit trenéra

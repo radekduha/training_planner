@@ -4,9 +4,9 @@ import { requestJson } from "../api/client.js";
 
 const navItems = [
   { to: "/", label: "Přehled" },
-  { to: "/trainings", label: "Tréninky" },
+  { to: "/trainings", label: "Školení" },
   { to: "/trainers", label: "Trenéři" },
-  { to: "/training-types", label: "Typy tréninků" },
+  { to: "/training-types", label: "Typy školení" },
 ];
 
 const CalendarIcon = () => (
@@ -21,7 +21,7 @@ const CalendarIcon = () => (
 const utilityItems = [{ to: "/calendar", label: "Kalendář", icon: CalendarIcon }];
 
 const actionItems = [
-  { to: "/trainings/new", label: "Vytvořit trénink" },
+  { to: "/trainings/new", label: "Vytvořit školení" },
   { to: "/trainers/new", label: "Vytvořit trenéra" },
 ];
 

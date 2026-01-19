@@ -119,6 +119,23 @@ const trainingPayload = (training) => {
   payload.assignment_reason = training.assignmentReason || "";
   payload.notes = training.notes || "";
   payload.google_event_id = training.googleEventId || "";
+  payload.visitors = training.visitors ?? null;
+  payload.accreditation = training.accreditation ?? null;
+  payload.hours = training.hours ?? null;
+  payload.trainers_fee = training.trainersFee ?? null;
+  payload.price_w_vat = training.priceWithVat ?? null;
+  payload.payer_address = training.payerAddress || "";
+  payload.payer_id = training.payerId || "";
+  payload.invoice_number = training.invoiceNumber || "";
+  payload.training_place = training.trainingPlace || "";
+  payload.contact_name = training.contactName || "";
+  payload.contact_phone = training.contactPhone || "";
+  payload.invoice_email = training.invoiceEmail || "";
+  payload.email_for_approval = training.approvalEmail || "";
+  payload.study_materials = training.studyMaterials || "";
+  payload.info_for_the_trainer = training.infoForTheTrainer || "";
+  payload.pp = training.pp || "";
+  payload.d = training.d || "";
   return payload;
 };
 

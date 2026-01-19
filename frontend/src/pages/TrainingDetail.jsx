@@ -6,6 +6,49 @@ import { fetchTraining, patchTraining } from "../api/trainings.js";
 import PageHeader from "../components/PageHeader.jsx";
 import FormField from "../components/FormField.jsx";
 
+const formatDate = (value) => {
+  if (!value) {
+    return "--";
+  }
+  return new Date(value).toLocaleDateString("cs-CZ");
+};
+
+const formatTime = (value) => {
+  if (!value) {
+    return "--";
+  }
+  return new Date(value).toLocaleTimeString("cs-CZ", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const formatBoolean = (value) => {
+  if (value === true) {
+    return "Ano";
+  }
+  if (value === false) {
+    return "Ne";
+  }
+  return "--";
+};
+
+const formatNumber = (value) => {
+  if (value === null || value === undefined || value === "") {
+    return "--";
+  }
+  return value;
+};
+
+const formatMoney = (value) => {
+  if (typeof value !== "number") {
+    return "--";
+  }
+  return `${new Intl.NumberFormat("cs-CZ").format(value)} Kč`;
+};
+
+const formatText = (value) => (value ? value : "--");
+
 const TrainingDetail = () => {
   const { id } = useParams();
   const [training, setTraining] = useState(null);
@@ -110,7 +153,7 @@ const TrainingDetail = () => {
   if (loading) {
     return (
       <section className="stack">
-        <p className="muted">Načítání tréninku...</p>
+        <p className="muted">Načítání školení...</p>
       </section>
     );
   }
@@ -119,10 +162,10 @@ const TrainingDetail = () => {
     return (
       <section className="stack">
         <div className="card">
-          <h2>Detail tréninku</h2>
+          <h2>Detail školení</h2>
           <p className="error">{error}</p>
           <Link className="btn" to="/trainings">
-            Zpět na tréninky
+            Zpět na školení
           </Link>
         </div>
       </section>
@@ -133,30 +176,68 @@ const TrainingDetail = () => {
     return null;
   }
 
+  const trainingPlace = training.training_place || training.address || "";
+
   return (
     <section className="stack">
       <PageHeader
-        title={`Trénink #${training.id}`}
+        title={`Školení #${training.id}`}
         subtitle={`${training.training_type?.name} / ${new Date(
           training.start_datetime
         ).toLocaleString()}`}
         actions={
           <Link className="btn btn-ghost" to={`/trainings/${training.id}/edit`}>
-            Upravit trénink
+            Upravit školení
           </Link>
         }
       />
       <div className="grid two">
         <div className="card">
-          <h3>Detail tréninku</h3>
+          <h3>Detail školení</h3>
           <div className="detail-list">
             <div>
               <span className="muted">Zákazník</span>
-              <strong>{training.customer_name || "--"}</strong>
+              <strong>{formatText(training.customer_name)}</strong>
+            </div>
+            <div>
+              <span className="muted">Typ školení</span>
+              <strong>{formatText(training.training_type?.name)}</strong>
+            </div>
+            <div>
+              <span className="muted">Datum od</span>
+              <strong>{formatDate(training.start_datetime)}</strong>
+            </div>
+            <div>
+              <span className="muted">Datum do</span>
+              <strong>{formatDate(training.end_datetime)}</strong>
+            </div>
+            <div>
+              <span className="muted">Začátek</span>
+              <strong>{formatTime(training.start_datetime)}</strong>
+            </div>
+            <div>
+              <span className="muted">Konec</span>
+              <strong>{formatTime(training.end_datetime)}</strong>
+            </div>
+            <div>
+              <span className="muted">Počet účastníků</span>
+              <strong>{formatNumber(training.visitors)}</strong>
+            </div>
+            <div>
+              <span className="muted">Akreditace</span>
+              <strong>{formatBoolean(training.accreditation)}</strong>
+            </div>
+            <div>
+              <span className="muted">Počet hodin</span>
+              <strong>{formatNumber(training.hours)}</strong>
+            </div>
+            <div>
+              <span className="muted">Místo školení</span>
+              <strong>{formatText(trainingPlace)}</strong>
             </div>
             <div>
               <span className="muted">Adresa</span>
-              <strong>{training.address}</strong>
+              <strong>{formatText(training.address)}</strong>
             </div>
             <div>
               <span className="muted">Souřadnice</span>
@@ -175,6 +256,68 @@ const TrainingDetail = () => {
                   training.assigned_trainer?.name ||
                   "--"}
               </strong>
+            </div>
+          </div>
+          <h4>Fakturace</h4>
+          <div className="detail-list">
+            <div>
+              <span className="muted">Plátce</span>
+              <strong>{formatText(training.payer_address)}</strong>
+            </div>
+            <div>
+              <span className="muted">IČO</span>
+              <strong>{formatText(training.payer_id)}</strong>
+            </div>
+            <div>
+              <span className="muted">Číslo faktury</span>
+              <strong>{formatText(training.invoice_number)}</strong>
+            </div>
+            <div>
+              <span className="muted">Fakturační e-mail</span>
+              <strong>{formatText(training.invoice_email)}</strong>
+            </div>
+            <div>
+              <span className="muted">E-mail pro schválení</span>
+              <strong>{formatText(training.email_for_approval)}</strong>
+            </div>
+            <div>
+              <span className="muted">Odměna lektora</span>
+              <strong>{formatMoney(training.trainers_fee)}</strong>
+            </div>
+            <div>
+              <span className="muted">Cena s DPH</span>
+              <strong>{formatMoney(training.price_w_vat)}</strong>
+            </div>
+          </div>
+          <h4>Kontakt a obsah</h4>
+          <div className="detail-list">
+            <div>
+              <span className="muted">Kontaktní osoba</span>
+              <strong>{formatText(training.contact_name)}</strong>
+            </div>
+            <div>
+              <span className="muted">Telefon</span>
+              <strong>{formatText(training.contact_phone)}</strong>
+            </div>
+            <div>
+              <span className="muted">Studijní materiály</span>
+              <strong>{formatText(training.study_materials)}</strong>
+            </div>
+            <div>
+              <span className="muted">Info pro lektora</span>
+              <strong>{formatText(training.info_for_the_trainer)}</strong>
+            </div>
+            <div>
+              <span className="muted">Poznámka</span>
+              <strong>{formatText(training.notes)}</strong>
+            </div>
+            <div>
+              <span className="muted">PP</span>
+              <strong>{formatText(training.pp)}</strong>
+            </div>
+            <div>
+              <span className="muted">D</span>
+              <strong>{formatText(training.d)}</strong>
             </div>
           </div>
           <h3>Upravit</h3>

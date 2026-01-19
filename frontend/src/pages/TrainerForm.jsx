@@ -271,7 +271,7 @@ const TrainerForm = ({ mode }) => {
             </select>
           </FormField>
           <FormField
-            label="Zavolat před tréninkem"
+            label="Zavolat před školením"
             htmlFor="call_before_training"
             error={fieldErrors.call_before_training}
           >
@@ -388,7 +388,7 @@ const TrainerForm = ({ mode }) => {
         <FormField label="Poznámky" htmlFor="notes" error={fieldErrors.notes}>
           <textarea id="notes" name="notes" value={formState.notes} onChange={onChange} />
         </FormField>
-        <h3>Typy tréninků</h3>
+        <h3>Typy školení</h3>
         <div className="chip-grid">
           {trainingTypes.map((type) => (
             <label className="chip" key={type.id}>

@@ -40,7 +40,7 @@ const TrainingTypes = () => {
 
   return (
     <section className="stack">
-      <PageHeader title="Typy tréninků" subtitle="Spravujte kategorie tréninků." />
+      <PageHeader title="Typy školení" subtitle="Spravujte kategorie školení." />
       <div className="grid two">
         <div className="card">
           <h3>Typy</h3>
@@ -53,7 +53,7 @@ const TrainingTypes = () => {
               ))}
             </ul>
           ) : (
-            <p className="muted">Zatím žádné typy tréninků.</p>
+            <p className="muted">Zatím žádné typy školení.</p>
           )}
         </div>
         <div className="card">

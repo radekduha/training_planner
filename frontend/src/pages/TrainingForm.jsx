@@ -47,9 +47,9 @@ const TrainingForm = ({ mode }) => {
 
   const pageTitle = useMemo(() => {
     if (isEdit) {
-      return `Upravit trénink #${id}`;
+      return `Upravit školení #${id}`;
     }
-    return "Nový trénink";
+    return "Nové školení";
   }, [isEdit, id]);
 
   useEffect(() => {
@@ -138,7 +138,7 @@ const TrainingForm = ({ mode }) => {
   if (loading) {
     return (
       <section className="stack">
-        <p className="muted">Načítání tréninku...</p>
+        <p className="muted">Načítání školení...</p>
       </section>
     );
   }
@@ -157,7 +157,7 @@ const TrainingForm = ({ mode }) => {
         }
       />
       <form className="card form" onSubmit={onSubmit}>
-        <FormField label="Typ tréninku" htmlFor="training_type" error={fieldErrors.training_type}>
+        <FormField label="Typ školení" htmlFor="training_type" error={fieldErrors.training_type}>
           <select
             id="training_type"
             name="training_type"
@@ -257,7 +257,7 @@ const TrainingForm = ({ mode }) => {
         {formError ? <p className="error">{formError}</p> : null}
         <div className="inline-actions">
           <button className="btn" type="submit" disabled={saving}>
-            {saving ? "Ukládám..." : isEdit ? "Uložit změny" : "Uložit trénink"}
+            {saving ? "Ukládám..." : isEdit ? "Uložit změny" : "Uložit školení"}
           </button>
           <Link className="btn btn-ghost" to={isEdit ? `/trainings/${id}` : "/trainings"}>
             Zrušit

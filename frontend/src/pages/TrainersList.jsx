@@ -107,7 +107,7 @@ const TrainersList = () => {
             </div>
             <p className="muted">
               Povinné sloupce: jméno, příjmení, adresa. Volitelné: titul před/za,
-              AKRIS, zavolat před tréninkem, frekvence, limit vzdálenosti, poznámka k
+              AKRIS, zavolat před školením, frekvence, limit vzdálenosti, poznámka k
               limitu, e-mail, telefon, souřadnice, sazby, poznámky.
             </p>
             <div className="stack">
@@ -173,8 +173,8 @@ const TrainersList = () => {
                   <tr>
                     <th>Jméno</th>
                     <th>Kontakt</th>
-                    <th>Počet přiřazených tréninků</th>
-                    <th>Nejbližší přiřazený trénink</th>
+                    <th>Počet přiřazených školení</th>
+                    <th>Nejbližší přiřazené školení</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -190,7 +190,7 @@ const TrainersList = () => {
                       <td>
                         {trainer.next_assigned_training ? (
                           <>
-                            {trainer.next_assigned_training.training_type?.name || "Trénink"} (
+                            {trainer.next_assigned_training.training_type?.name || "Školení"} (
                             {new Date(
                               trainer.next_assigned_training.start_datetime
                             ).toLocaleString()}

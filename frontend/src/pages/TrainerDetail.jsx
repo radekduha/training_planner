@@ -238,7 +238,7 @@ const TrainerDetail = () => {
               </div>
               <div className="detail-divider" role="presentation" />
               <div className="detail-item">
-                <span className="detail-label">Zavolat před tréninkem</span>
+                <span className="detail-label">Zavolat před školením</span>
                 <strong className="detail-value">
                   {trainer.call_before_training ? "Ano" : "Ne"}
                 </strong>
@@ -302,13 +302,13 @@ const TrainerDetail = () => {
               <div className="detail-item">
                 <span className="detail-label">Vytížení tento měsíc</span>
                 <strong className="detail-value">
-                  {workload.month_workload} tréninků, {workload.month_long_trips} dlouhých cest
+                  {workload.month_workload} školení, {workload.month_long_trips} dlouhých cest
                 </strong>
               </div>
             </div>
           </div>
           <div className="card">
-            <h3>Typy tréninků</h3>
+            <h3>Typy školení</h3>
             <div className="pill-row">
               {trainer.training_types?.length ? (
                 trainer.training_types.map((type) => (
@@ -317,7 +317,7 @@ const TrainerDetail = () => {
                   </span>
                 ))
               ) : (
-                <p className="muted">Žádné typy tréninků nejsou přiřazeny.</p>
+                <p className="muted">Žádné typy školení nejsou přiřazeny.</p>
               )}
             </div>
           </div>
@@ -336,13 +336,13 @@ const TrainerDetail = () => {
           </div>
         </div>
         <div className="card">
-          <h3>Přiřazené tréninky</h3>
+          <h3>Přiřazená školení</h3>
           {assignedTrainings.length ? (
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Trénink</th>
+                    <th>Školení</th>
                     <th>Datum</th>
                     <th>Stav</th>
                   </tr>
@@ -365,7 +365,7 @@ const TrainerDetail = () => {
               </table>
             </div>
           ) : (
-            <p className="muted">Zatím žádné přiřazené tréninky.</p>
+            <p className="muted">Zatím žádná přiřazená školení.</p>
           )}
         </div>
       </div>

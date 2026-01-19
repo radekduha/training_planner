@@ -34,7 +34,7 @@ const CalendarMonth = () => {
         title={
           calendar ? `${calendar.month_name} ${calendar.year}` : "Kalendář"
         }
-        subtitle="Měsíční přehled tréninků."
+        subtitle="Měsíční přehled školení."
         actions={
           calendar ? (
             <div className="inline-actions">

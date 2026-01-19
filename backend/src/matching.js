@@ -135,7 +135,7 @@ const recommendTrainers = (training, trainers, existingTrainings) => {
 
     const skillIds = new Set((trainer.skills || []).map((skill) => skill.trainingTypeId));
     if (!skillIds.has(training.trainingTypeId)) {
-      ruleFailures.push("Neučí tento typ tréninku");
+      ruleFailures.push("Neučí tento typ školení");
     }
 
     const maxDistance = ruleValue(trainer, "max_distance_km");
@@ -183,7 +183,7 @@ const recommendTrainers = (training, trainers, existingTrainings) => {
 
     const reasons = [
       `Vzdálenost ${distance.toFixed(1)} km`,
-      `Vytížení ${totalWorkload} (tréninky ${monthlyWorkload}, dlouhé cesty ${longTrips})`,
+      `Vytížení ${totalWorkload} (školení ${monthlyWorkload}, dlouhé cesty ${longTrips})`,
     ];
     if (estCost !== null) {
       reasons.push(`Odhadované náklady ${Math.round(estCost)} Kč`);

@@ -111,6 +111,86 @@ const parseBoolean = (value) => {
   return null;
 };
 
+const parseTrainingExtras = (payload, errors) => {
+  const visitors = toInt(payload.visitors);
+  if (payload.visitors !== undefined && payload.visitors !== "" && visitors === null) {
+    addError(errors, "visitors", "Enter a valid number of visitors.");
+  }
+
+  let accreditation = null;
+  if (payload.accreditation !== undefined && payload.accreditation !== "") {
+    accreditation = parseBoolean(payload.accreditation);
+    if (accreditation === null) {
+      addError(errors, "accreditation", "Select a valid value.");
+    }
+  }
+
+  const hours = toInt(payload.hours);
+  if (payload.hours !== undefined && payload.hours !== "" && hours === null) {
+    addError(errors, "hours", "Enter a valid number of hours.");
+  }
+
+  const trainersFee = toNumber(payload.trainers_fee);
+  if (
+    payload.trainers_fee !== undefined &&
+    payload.trainers_fee !== "" &&
+    trainersFee === null
+  ) {
+    addError(errors, "trainers_fee", "Enter a valid trainers fee.");
+  }
+
+  const priceWithVat = toNumber(payload.price_w_vat);
+  if (
+    payload.price_w_vat !== undefined &&
+    payload.price_w_vat !== "" &&
+    priceWithVat === null
+  ) {
+    addError(errors, "price_w_vat", "Enter a valid price.");
+  }
+
+  const payerAddress = (payload.payer_address || "").trim() || null;
+  const payerId = (payload.payer_id || "").trim() || null;
+  const invoiceNumber = (payload.invoice_number || "").trim() || null;
+  const trainingPlace = (payload.training_place || "").trim() || null;
+  const contactName = (payload.contact_name || "").trim() || null;
+  const contactPhone = (payload.contact_phone || "").trim() || null;
+
+  const invoiceEmail = (payload.invoice_email || "").trim();
+  if (invoiceEmail && !invoiceEmail.includes("@")) {
+    addError(errors, "invoice_email", "Enter a valid email address.");
+  }
+
+  const approvalEmail = (payload.email_for_approval || "").trim();
+  if (approvalEmail && !approvalEmail.includes("@")) {
+    addError(errors, "email_for_approval", "Enter a valid email address.");
+  }
+
+  const studyMaterials = (payload.study_materials || "").trim() || null;
+  const infoForTheTrainer = (payload.info_for_the_trainer || "").trim() || null;
+  const pp = (payload.pp || "").trim() || null;
+  const dValue = (payload.d || "").trim() || null;
+
+  return {
+    visitors,
+    accreditation,
+    hours,
+    trainersFee,
+    priceWithVat,
+    payerAddress,
+    payerId,
+    invoiceNumber,
+    trainingPlace,
+    contactName,
+    contactPhone,
+    invoiceEmail: invoiceEmail || null,
+    approvalEmail: approvalEmail || null,
+    studyMaterials,
+    infoForTheTrainer,
+    pp,
+    d: dValue,
+  };
+};
+
 const normalizeHeader = (value) => {
   if (!value) {
     return "";
@@ -156,8 +236,8 @@ const HEADER_ALIASES = {
   call_before_training: [
     "call_before_training",
     "call before training",
-    "zavolat_pred_treninkem",
-    "zavolat před tréninkem",
+    "zavolat_pred_skolenim",
+    "zavolat před školením",
   ],
   email: ["email", "e-mail", "mail"],
   phone: ["phone", "telefon", "tel"],
@@ -198,11 +278,47 @@ const HEADER_LOOKUP = Object.entries(HEADER_ALIASES).reduce((acc, [key, aliases]
   return acc;
 }, {});
 
-const buildHeaderIndex = (headers) => {
+const TRAINING_HEADER_ALIASES = {
+  start_date: ["start_date"],
+  end_date: ["end_date"],
+  training_name: ["training_name"],
+  visitors: ["visitors"],
+  accreditation: ["accreditation"],
+  hours: ["hours"],
+  start_time: ["start_time"],
+  end_time: ["end_time"],
+  trainers_fee: ["trainers_fee"],
+  price_w_vat: ["price_w_vat"],
+  payer_address: ["payer_address"],
+  payer_id: ["payer_id", "pyer_id"],
+  invoice_number: ["invoice_number"],
+  training_place: ["training_place"],
+  contact_name: ["contact_name"],
+  contact_phone: ["contact_phone"],
+  invoice_email: ["invoice_email"],
+  email_for_approval: ["email_for_approval"],
+  note: ["note"],
+  study_materials: ["study_materials"],
+  info_for_the_trainer: ["info_for_the_trainer"],
+  pp: ["pp"],
+  d: ["d"],
+};
+
+const TRAINING_HEADER_LOOKUP = Object.entries(TRAINING_HEADER_ALIASES).reduce(
+  (acc, [key, aliases]) => {
+    aliases.forEach((alias) => {
+      acc[normalizeHeader(alias)] = key;
+    });
+    return acc;
+  },
+  {}
+);
+
+const buildHeaderIndex = (headers, headerLookup = HEADER_LOOKUP) => {
   const index = {};
   headers.forEach((header, idx) => {
     const normalized = normalizeHeader(header);
-    const key = HEADER_LOOKUP[normalized];
+    const key = headerLookup[normalized];
     if (key && index[key] === undefined) {
       index[key] = idx;
     }
@@ -302,6 +418,71 @@ const parseCsvNumber = (value) => {
   }
   const normalized = String(value).trim().replace(/\s+/g, "").replace(",", ".");
   const parsed = Number(normalized);
+  if (Number.isNaN(parsed)) {
+    return null;
+  }
+  return parsed;
+};
+
+const buildGeocodeCandidates = (values) => {
+  const candidates = [];
+  values.forEach((value) => {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) {
+      return;
+    }
+    if (!candidates.includes(trimmed)) {
+      candidates.push(trimmed);
+    }
+    const short = trimmed.split(",")[0].trim();
+    if (short && short !== trimmed && !candidates.includes(short)) {
+      candidates.push(short);
+    }
+  });
+  return candidates;
+};
+
+const geocodeFromCandidates = async (candidates) => {
+  for (const address of candidates) {
+    const geo = await geocodeAddress(address);
+    if (geo) {
+      return geo;
+    }
+  }
+  return null;
+};
+
+const parseCsvInteger = (value) => {
+  const parsed = parseCsvNumber(value);
+  if (parsed === null || !Number.isInteger(parsed)) {
+    return null;
+  }
+  return parsed;
+};
+
+const parseCsvMoney = (value) => {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return null;
+  }
+  const normalized = String(value).trim().replace(/\s+/g, "");
+  if (!normalized) {
+    return null;
+  }
+  const withoutDots = normalized.replace(/\./g, "");
+  if (withoutDots.includes(",")) {
+    const parts = withoutDots.split(",");
+    if (parts.length !== 2 || parts[1].length === 0) {
+      return null;
+    }
+    if (parts[1].length === 3) {
+      const combined = `${parts[0]}${parts[1]}`;
+      const parsed = Number(combined);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    const parsed = Number(`${parts[0]}.${parts[1]}`);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  const parsed = Number(withoutDots);
   if (Number.isNaN(parsed)) {
     return null;
   }
@@ -492,6 +673,8 @@ api.post(
       addError(errors, "lng", "Enter a valid longitude.");
     }
 
+    const extras = parseTrainingExtras(payload, errors);
+
     if (hasErrors(errors)) {
       return res.status(400).json({ errors });
     }
@@ -536,6 +719,23 @@ api.post(
         assignmentReason: payload.assignment_reason || "",
         notes: payload.notes || "",
         googleEventId: payload.google_event_id || "",
+        visitors: extras.visitors,
+        accreditation: extras.accreditation,
+        hours: extras.hours,
+        trainersFee: extras.trainersFee,
+        priceWithVat: extras.priceWithVat,
+        payerAddress: extras.payerAddress,
+        payerId: extras.payerId,
+        invoiceNumber: extras.invoiceNumber,
+        trainingPlace: extras.trainingPlace,
+        contactName: extras.contactName,
+        contactPhone: extras.contactPhone,
+        invoiceEmail: extras.invoiceEmail,
+        approvalEmail: extras.approvalEmail,
+        studyMaterials: extras.studyMaterials,
+        infoForTheTrainer: extras.infoForTheTrainer,
+        pp: extras.pp,
+        d: extras.d,
       },
       include: trainingIncludes,
     });
@@ -560,6 +760,25 @@ api.get(
       return res.status(404).json({ error: "Training not found." });
     }
 
+    let resolvedTraining = training;
+    if (training.lat === null || training.lng === null) {
+      const candidates = buildGeocodeCandidates([
+        training.trainingPlace,
+        training.address,
+        training.payerAddress,
+      ]);
+      if (candidates.length) {
+        const geo = await geocodeFromCandidates(candidates);
+        if (geo) {
+          resolvedTraining = await prisma.training.update({
+            where: { id: training.id },
+            data: { lat: geo.lat, lng: geo.lng },
+            include: trainingIncludes,
+          });
+        }
+      }
+    }
+
     const [trainers, existingTrainings] = await Promise.all([
       prisma.trainer.findMany({ include: trainerIncludes }),
       prisma.training.findMany({
@@ -575,7 +794,7 @@ api.get(
       }),
     ]);
 
-    const recommendations = recommendTrainers(training, trainers, existingTrainings);
+    const recommendations = recommendTrainers(resolvedTraining, trainers, existingTrainings);
     const matches = recommendations.matches.map((match) => ({
       trainer: trainerSummary(match.trainer),
       score: match.score,
@@ -585,7 +804,7 @@ api.get(
     }));
 
     return res.json({
-      item: trainingPayload(training),
+      item: trainingPayload(resolvedTraining),
       recommendations: {
         matches,
         used_compromise: recommendations.usedCompromise,
@@ -656,6 +875,8 @@ api.put(
       addError(errors, "lng", "Enter a valid longitude.");
     }
 
+    const extras = parseTrainingExtras(payload, errors);
+
     if (hasErrors(errors)) {
       return res.status(400).json({ errors });
     }
@@ -701,6 +922,23 @@ api.put(
         assignmentReason: payload.assignment_reason || "",
         notes: payload.notes || "",
         googleEventId: payload.google_event_id || "",
+        visitors: extras.visitors,
+        accreditation: extras.accreditation,
+        hours: extras.hours,
+        trainersFee: extras.trainersFee,
+        priceWithVat: extras.priceWithVat,
+        payerAddress: extras.payerAddress,
+        payerId: extras.payerId,
+        invoiceNumber: extras.invoiceNumber,
+        trainingPlace: extras.trainingPlace,
+        contactName: extras.contactName,
+        contactPhone: extras.contactPhone,
+        invoiceEmail: extras.invoiceEmail,
+        approvalEmail: extras.approvalEmail,
+        studyMaterials: extras.studyMaterials,
+        infoForTheTrainer: extras.infoForTheTrainer,
+        pp: extras.pp,
+        d: extras.d,
       },
       include: trainingIncludes,
     });
@@ -780,6 +1018,277 @@ api.patch(
     });
 
     return res.json({ item: trainingPayload(updated) });
+  })
+);
+
+api.post(
+  "/trainings/import/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const csv = payload.csv;
+    if (!csv || typeof csv !== "string") {
+      return res.status(400).json({ error: "CSV obsah je povinný." });
+    }
+
+    const text = csv.charCodeAt(0) === 0xfeff ? csv.slice(1) : csv;
+    const firstLine = text.split(/\r?\n/, 1)[0] || "";
+    const delimiter = detectDelimiter(firstLine);
+    const rows = parseCsv(text, delimiter);
+    if (!rows.length) {
+      return res.status(400).json({ error: "CSV soubor je prázdný." });
+    }
+
+    const headers = rows[0].map((header) => String(header || "").trim());
+    const headerIndex = buildHeaderIndex(headers, TRAINING_HEADER_LOOKUP);
+    const requiredHeaders = ["start_date", "training_name", "start_time", "end_time"];
+    const missingHeaders = requiredHeaders.filter((key) => headerIndex[key] === undefined);
+    if (missingHeaders.length) {
+      return res.status(400).json({
+        error: `Chybí povinné sloupce: ${missingHeaders.join(", ")}.`,
+      });
+    }
+    if (headerIndex.training_place === undefined && headerIndex.payer_address === undefined) {
+      return res.status(400).json({
+        error: "Chybí povinný sloupec: training_place nebo payer_address.",
+      });
+    }
+
+    const dryRun = payload.dry_run === true;
+    const errors = [];
+    let imported = 0;
+    let skipped = 0;
+
+    const getValue = (row, key) => {
+      const idx = headerIndex[key];
+      if (idx === undefined) {
+        return "";
+      }
+      return row[idx] ?? "";
+    };
+
+    const normalizeTime = (value) => {
+      if (value === null || value === undefined) {
+        return null;
+      }
+      const raw = String(value).trim();
+      if (!raw) {
+        return null;
+      }
+      const normalized = raw.replace(",", ":").replace(".", ":");
+      const match = normalized.match(/^(\d{1,2})(?::(\d{1,2}))?(?::\d{1,2})?$/);
+      if (!match) {
+        return null;
+      }
+      const hours = Number(match[1]);
+      const minutes = Number(match[2] || "0");
+      if (
+        Number.isNaN(hours) ||
+        Number.isNaN(minutes) ||
+        hours < 0 ||
+        hours > 23 ||
+        minutes < 0 ||
+        minutes > 59
+      ) {
+        return null;
+      }
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+    };
+
+    const trainingTypes = await prisma.trainingType.findMany();
+    const trainingTypeIndex = new Map(
+      trainingTypes.map((item) => [normalizeHeader(item.name), item])
+    );
+
+    const ensureTrainingType = async (name) => {
+      const key = normalizeHeader(name);
+      const existing = trainingTypeIndex.get(key);
+      if (existing) {
+        return existing;
+      }
+      if (dryRun) {
+        const placeholder = { id: null, name };
+        trainingTypeIndex.set(key, placeholder);
+        return placeholder;
+      }
+      const created = await prisma.trainingType.create({ data: { name } });
+      trainingTypeIndex.set(key, created);
+      return created;
+    };
+
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i];
+      const rowNumber = i + 1;
+      if (!row || row.every((cell) => !String(cell || "").trim())) {
+        continue;
+      }
+
+      const rowErrors = [];
+      const trainingName = String(getValue(row, "training_name") || "").trim();
+      if (!trainingName) {
+        rowErrors.push({ field: "training_name", message: "Název školení je povinný." });
+      }
+
+      const startDateRaw = String(getValue(row, "start_date") || "").trim();
+      const startDate = parseDateOnly(startDateRaw);
+      if (!startDate) {
+        rowErrors.push({ field: "start_date", message: "Neplatné datum začátku." });
+      }
+
+      const endDateRaw = String(getValue(row, "end_date") || "").trim();
+      let endDate = startDate;
+      if (endDateRaw) {
+        endDate = parseDateOnly(endDateRaw);
+        if (!endDate) {
+          rowErrors.push({ field: "end_date", message: "Neplatné datum konce." });
+        }
+      }
+
+      const startTimeRaw = String(getValue(row, "start_time") || "").trim();
+      const startTime = normalizeTime(startTimeRaw);
+      if (!startTime) {
+        rowErrors.push({ field: "start_time", message: "Neplatný čas začátku." });
+      }
+      const endTimeRaw = String(getValue(row, "end_time") || "").trim();
+      const endTime = normalizeTime(endTimeRaw);
+      if (!endTime) {
+        rowErrors.push({ field: "end_time", message: "Neplatný čas konce." });
+      }
+
+      const startDatetime =
+        startDate && startTime ? parseDateTime(`${formatDate(startDate)}T${startTime}`) : null;
+      const endDatetime =
+        endDate && endTime ? parseDateTime(`${formatDate(endDate)}T${endTime}`) : null;
+      if (!startDatetime) {
+        rowErrors.push({ field: "start_date", message: "Neplatný termín školení." });
+      }
+      if (!endDatetime) {
+        rowErrors.push({ field: "end_date", message: "Neplatný termín školení." });
+      }
+      if (startDatetime && endDatetime && endDatetime <= startDatetime) {
+        rowErrors.push({ field: "end_time", message: "Konec musí být po začátku." });
+      }
+
+      const visitors = parseCsvInteger(getValue(row, "visitors"));
+      if (getValue(row, "visitors") && visitors === null) {
+        rowErrors.push({ field: "visitors", message: "Neplatný počet účastníků." });
+      }
+
+      const accreditationRaw = getValue(row, "accreditation");
+      const accreditation = parseCsvBoolean(accreditationRaw, null);
+      if (accreditationRaw && accreditation === null) {
+        rowErrors.push({ field: "accreditation", message: "Akreditace musí být Ano/Ne." });
+      }
+
+      const hours = parseCsvInteger(getValue(row, "hours"));
+      if (getValue(row, "hours") && hours === null) {
+        rowErrors.push({ field: "hours", message: "Neplatný počet hodin." });
+      }
+
+      const trainersFee = parseCsvMoney(getValue(row, "trainers_fee"));
+      if (getValue(row, "trainers_fee") && trainersFee === null) {
+        rowErrors.push({ field: "trainers_fee", message: "Neplatná odměna lektora." });
+      }
+
+      const priceWithVat = parseCsvMoney(getValue(row, "price_w_vat"));
+      if (getValue(row, "price_w_vat") && priceWithVat === null) {
+        rowErrors.push({ field: "price_w_vat", message: "Neplatná cena s DPH." });
+      }
+
+      const payerAddress = String(getValue(row, "payer_address") || "").trim();
+      const payerId = String(getValue(row, "payer_id") || "").trim();
+      const invoiceNumber = String(getValue(row, "invoice_number") || "").trim();
+      const trainingPlace = String(getValue(row, "training_place") || "").trim();
+      const address = trainingPlace || payerAddress;
+      if (!address) {
+        rowErrors.push({ field: "training_place", message: "Místo školení je povinné." });
+      }
+
+      const contactName = String(getValue(row, "contact_name") || "").trim();
+      const contactPhone = String(getValue(row, "contact_phone") || "").trim();
+      const invoiceEmail = String(getValue(row, "invoice_email") || "").trim();
+      if (invoiceEmail && !invoiceEmail.includes("@")) {
+        rowErrors.push({ field: "invoice_email", message: "Neplatný e-mail." });
+      }
+      const approvalEmail = String(getValue(row, "email_for_approval") || "").trim();
+      if (approvalEmail && !approvalEmail.includes("@")) {
+        rowErrors.push({ field: "email_for_approval", message: "Neplatný e-mail." });
+      }
+
+      const note = String(getValue(row, "note") || "").trim();
+      const studyMaterials = String(getValue(row, "study_materials") || "").trim();
+      const infoForTheTrainer = String(getValue(row, "info_for_the_trainer") || "").trim();
+      const pp = String(getValue(row, "pp") || "").trim();
+      const dValue = String(getValue(row, "d") || "").trim();
+
+      if (rowErrors.length) {
+        errors.push({ row: rowNumber, errors: rowErrors });
+        skipped += 1;
+        continue;
+      }
+
+      if (!dryRun) {
+        const trainingType = await ensureTrainingType(trainingName);
+        const customerName = payerAddress || trainingPlace || "";
+        let resolvedLat = null;
+        let resolvedLng = null;
+        const candidates = buildGeocodeCandidates([trainingPlace, payerAddress, address]);
+        if (candidates.length) {
+          const geo = await geocodeFromCandidates(candidates);
+          if (geo) {
+            resolvedLat = geo.lat;
+            resolvedLng = geo.lng;
+          }
+        }
+
+        await prisma.training.create({
+          data: {
+            trainingTypeId: trainingType.id,
+            customerName,
+            address,
+            lat: resolvedLat,
+            lng: resolvedLng,
+            startDatetime,
+            endDatetime,
+            status: "waiting",
+            assignedTrainerId: null,
+            assignmentReason: "",
+            notes: note,
+            googleEventId: "",
+            visitors,
+            accreditation,
+            hours,
+            trainersFee,
+            priceWithVat,
+            payerAddress: payerAddress || null,
+            payerId: payerId || null,
+            invoiceNumber: invoiceNumber || null,
+            trainingPlace: trainingPlace || null,
+            contactName: contactName || null,
+            contactPhone: contactPhone || null,
+            invoiceEmail: invoiceEmail || null,
+            approvalEmail: approvalEmail || null,
+            studyMaterials: studyMaterials || null,
+            infoForTheTrainer: infoForTheTrainer || null,
+            pp: pp || null,
+            d: dValue || null,
+          },
+        });
+      }
+
+      imported += 1;
+    }
+
+    return res.json({
+      dry_run: dryRun,
+      summary: {
+        total_rows: rows.length - 1,
+        imported,
+        skipped,
+        errors: errors.length,
+      },
+      errors,
+    });
   })
 );
 
@@ -931,7 +1440,7 @@ api.post(
       if (callBeforeTraining === null) {
         rowErrors.push({
           field: "call_before_training",
-          message: "Zavolat před tréninkem musí být Ano/Ne.",
+          message: "Zavolat před školením musí být Ano/Ne.",
         });
       }
 
