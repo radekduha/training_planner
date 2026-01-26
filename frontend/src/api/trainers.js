@@ -12,3 +12,6 @@ export const updateTrainer = (id, payload) =>
 
 export const importTrainers = (payload) =>
   requestJson("/trainers/import/", { method: "POST", body: payload });
+
+export const bulkDeleteTrainers = (payload) =>
+  requestJson("/trainers/bulk-delete/", { method: "POST", body: payload });

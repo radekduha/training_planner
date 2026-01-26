@@ -576,6 +576,29 @@ textarea {
   flex-wrap: wrap;
 }
 
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.bulk-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.table-checkbox {
+  width: auto;
+  margin: 0;
+}
+
+.col-select {
+  width: 44px;
+}
+
 .form {
   display: flex;
   flex-direction: column;
@@ -628,6 +651,66 @@ textarea {
   margin: 0;
   display: grid;
   gap: 10px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.training-types-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.training-type-row {
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #fffdf8;
+}
+
+.training-type-select {
+  display: flex;
+  align-items: center;
+}
+
+.training-type-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.training-type-name {
+  font-weight: 600;
+  color: var(--bg-ink);
+}
+
+.training-type-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-self: end;
+}
+
+.btn-ghost.btn-danger {
+  color: #b42318;
+  border-color: rgba(180, 35, 24, 0.5);
+}
+
+.btn-ghost.btn-danger:hover {
+  border-color: rgba(180, 35, 24, 0.8);
 }
 
 .pill-row {
@@ -864,6 +947,17 @@ th {
   }
 
   .nav-actions {
+    justify-self: start;
+  }
+}
+
+@media (max-width: 720px) {
+  .training-type-row {
+    grid-template-columns: auto 1fr;
+  }
+
+  .training-type-actions {
+    grid-column: 1 / -1;
     justify-self: start;
   }
 }

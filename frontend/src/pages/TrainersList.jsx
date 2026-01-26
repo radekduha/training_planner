@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { fetchTrainers, importTrainers } from "../api/trainers.js";
+import { bulkDeleteTrainers, fetchTrainers, importTrainers } from "../api/trainers.js";
 import PageHeader from "../components/PageHeader.jsx";
 
 const TrainersList = () => {
@@ -14,13 +14,19 @@ const TrainersList = () => {
   const [importResult, setImportResult] = useState(null);
   const [dryRun, setDryRun] = useState(true);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkError, setBulkError] = useState(null);
+  const selectAllRef = useRef(null);
 
   const loadTrainers = () => {
     setLoading(true);
     setError(null);
+    setBulkError(null);
     fetchTrainers()
       .then((data) => {
         setTrainers(data.items || []);
+        setSelectedIds(new Set());
       })
       .catch((err) => {
         setError(err.message);
@@ -31,6 +37,15 @@ const TrainersList = () => {
   useEffect(() => {
     loadTrainers();
   }, []);
+
+  useEffect(() => {
+    if (!selectAllRef.current) {
+      return;
+    }
+    const isAllSelected = trainers.length > 0 && selectedIds.size === trainers.length;
+    selectAllRef.current.indeterminate =
+      selectedIds.size > 0 && !isAllSelected && trainers.length > 0;
+  }, [selectedIds, trainers]);
 
   const onFileChange = (event) => {
     const file = event.target.files?.[0] || null;
@@ -60,6 +75,54 @@ const TrainersList = () => {
       setImporting(false);
     }
   };
+
+  const toggleSelectAll = () => {
+    setBulkError(null);
+    setSelectedIds((prev) => {
+      if (trainers.length === 0) {
+        return new Set();
+      }
+      if (prev.size === trainers.length) {
+        return new Set();
+      }
+      return new Set(trainers.map((item) => item.id));
+    });
+  };
+
+  const toggleSelection = (id) => {
+    setBulkError(null);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const onBulkDelete = async () => {
+    if (!selectedIds.size) {
+      return;
+    }
+    const count = selectedIds.size;
+    if (!window.confirm(`Opravdu chcete smazat ${count} vybraných trenérů?`)) {
+      return;
+    }
+    setBulkDeleting(true);
+    setBulkError(null);
+    try {
+      await bulkDeleteTrainers({ ids: Array.from(selectedIds) });
+      loadTrainers();
+    } catch (err) {
+      setBulkError(err.message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const isAllSelected = trainers.length > 0 && selectedIds.size === trainers.length;
 
   return (
     <section className="stack">
@@ -167,44 +230,81 @@ const TrainersList = () => {
           ) : error ? (
             <p className="error">{error}</p>
           ) : trainers.length ? (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Jméno</th>
-                    <th>Kontakt</th>
-                    <th>Počet přiřazených školení</th>
-                    <th>Nejbližší přiřazené školení</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trainers.map((trainer) => (
-                    <tr key={trainer.id}>
-                      <td>
-                        <Link className="text-link" to={`/trainers/${trainer.id}`}>
-                          {trainer.display_name || trainer.name}
-                        </Link>
-                      </td>
-                      <td>{trainer.email || "--"}</td>
-                      <td>{trainer.assigned_trainings_count ?? 0}</td>
-                      <td>
-                        {trainer.next_assigned_training ? (
-                          <>
-                            {trainer.next_assigned_training.training_type?.name || "Školení"} (
-                            {new Date(
-                              trainer.next_assigned_training.start_datetime
-                            ).toLocaleString()}
-                            )
-                          </>
-                        ) : (
-                          "--"
-                        )}
-                      </td>
+            <>
+              <div className="bulk-actions">
+                <div className="bulk-select">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    className="table-checkbox"
+                    checked={isAllSelected}
+                    onChange={toggleSelectAll}
+                    aria-label="Vybrat všechny trenéry"
+                  />
+                  <span className="muted">Vybrat vše</span>
+                </div>
+                <div className="inline-actions">
+                  <span className="muted">Vybráno: {selectedIds.size}</span>
+                  <button
+                    className="btn btn-ghost btn-danger"
+                    type="button"
+                    onClick={onBulkDelete}
+                    disabled={!selectedIds.size || bulkDeleting}
+                  >
+                    {bulkDeleting ? "Mažu..." : "Smazat"}
+                  </button>
+                </div>
+                {bulkError ? <p className="error">{bulkError}</p> : null}
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th className="col-select"></th>
+                      <th>Jméno</th>
+                      <th>Kontakt</th>
+                      <th>Počet přiřazených školení</th>
+                      <th>Nejbližší přiřazené školení</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {trainers.map((trainer) => (
+                      <tr key={trainer.id}>
+                        <td className="col-select">
+                          <input
+                            type="checkbox"
+                            className="table-checkbox"
+                            checked={selectedIds.has(trainer.id)}
+                            onChange={() => toggleSelection(trainer.id)}
+                            aria-label={`Vybrat trenéra ${trainer.display_name || trainer.name}`}
+                          />
+                        </td>
+                        <td>
+                          <Link className="text-link" to={`/trainers/${trainer.id}`}>
+                            {trainer.display_name || trainer.name}
+                          </Link>
+                        </td>
+                        <td>{trainer.email || "--"}</td>
+                        <td>{trainer.assigned_trainings_count ?? 0}</td>
+                        <td>
+                          {trainer.next_assigned_training ? (
+                            <>
+                              {trainer.next_assigned_training.training_type?.name || "Školení"} (
+                              {new Date(
+                                trainer.next_assigned_training.start_datetime
+                              ).toLocaleString()}
+                              )
+                            </>
+                          ) : (
+                            "--"
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           ) : (
             <div className="empty-state">
               <div>

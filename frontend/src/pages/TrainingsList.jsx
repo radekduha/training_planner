@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { fetchMeta } from "../api/meta.js";
-import { fetchTrainings, importTrainings } from "../api/trainings.js";
+import { bulkDeleteTrainings, fetchTrainings, importTrainings } from "../api/trainings.js";
 import PageHeader from "../components/PageHeader.jsx";
 
 const emptyFilters = {
@@ -25,6 +25,10 @@ const TrainingsList = () => {
   const [importResult, setImportResult] = useState(null);
   const [dryRun, setDryRun] = useState(true);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkError, setBulkError] = useState(null);
+  const selectAllRef = useRef(null);
 
   const loadTrainings = async (activeFilters) => {
     setLoading(true);
@@ -36,6 +40,7 @@ const TrainingsList = () => {
       };
       const data = await fetchTrainings(payload);
       setTrainings(data.items || []);
+      setSelectedIds(new Set());
     } catch (err) {
       setError(err.message);
     } finally {
@@ -54,6 +59,15 @@ const TrainingsList = () => {
       .catch(() => {});
     loadTrainings(emptyFilters);
   }, []);
+
+  useEffect(() => {
+    if (!selectAllRef.current) {
+      return;
+    }
+    const isAllSelected = trainings.length > 0 && selectedIds.size === trainings.length;
+    selectAllRef.current.indeterminate =
+      selectedIds.size > 0 && !isAllSelected && trainings.length > 0;
+  }, [selectedIds, trainings]);
 
   const onFileChange = (event) => {
     const file = event.target.files?.[0] || null;
@@ -101,6 +115,54 @@ const TrainingsList = () => {
     setFilters(emptyFilters);
     loadTrainings(emptyFilters);
   };
+
+  const toggleSelectAll = () => {
+    setBulkError(null);
+    setSelectedIds((prev) => {
+      if (trainings.length === 0) {
+        return new Set();
+      }
+      if (prev.size === trainings.length) {
+        return new Set();
+      }
+      return new Set(trainings.map((item) => item.id));
+    });
+  };
+
+  const toggleSelection = (id) => {
+    setBulkError(null);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const onBulkDelete = async () => {
+    if (!selectedIds.size) {
+      return;
+    }
+    const count = selectedIds.size;
+    if (!window.confirm(`Opravdu chcete smazat ${count} vybraných školení?`)) {
+      return;
+    }
+    setBulkDeleting(true);
+    setBulkError(null);
+    try {
+      await bulkDeleteTrainings({ ids: Array.from(selectedIds) });
+      await loadTrainings(filters);
+    } catch (err) {
+      setBulkError(err.message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const isAllSelected = trainings.length > 0 && selectedIds.size === trainings.length;
 
   return (
     <section className="stack">
@@ -278,44 +340,81 @@ const TrainingsList = () => {
           ) : error ? (
             <p className="error">{error}</p>
           ) : trainings.length ? (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Typ</th>
-                    <th>Zákazník</th>
-                    <th>Adresa</th>
-                    <th>Kdy</th>
-                    <th>Stav</th>
-                    <th>Trenér</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trainings.map((training) => (
-                    <tr key={training.id}>
-                      <td>{training.training_type?.name}</td>
-                      <td>{training.customer_name || "--"}</td>
-                      <td>{training.address}</td>
-                      <td>{new Date(training.start_datetime).toLocaleString()}</td>
-                      <td>
-                        <span className="pill">{training.status_label}</span>
-                      </td>
-                      <td>
-                        {training.assigned_trainer?.display_name ||
-                          training.assigned_trainer?.name ||
-                          "--"}
-                      </td>
-                      <td>
-                        <Link className="text-link" to={`/trainings/${training.id}`}>
-                          Detail
-                        </Link>
-                      </td>
+            <>
+              <div className="bulk-actions">
+                <div className="bulk-select">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    className="table-checkbox"
+                    checked={isAllSelected}
+                    onChange={toggleSelectAll}
+                    aria-label="Vybrat všechna školení"
+                  />
+                  <span className="muted">Vybrat vše</span>
+                </div>
+                <div className="inline-actions">
+                  <span className="muted">Vybráno: {selectedIds.size}</span>
+                  <button
+                    className="btn btn-ghost btn-danger"
+                    type="button"
+                    onClick={onBulkDelete}
+                    disabled={!selectedIds.size || bulkDeleting}
+                  >
+                    {bulkDeleting ? "Mažu..." : "Smazat"}
+                  </button>
+                </div>
+                {bulkError ? <p className="error">{bulkError}</p> : null}
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th className="col-select"></th>
+                      <th>Typ</th>
+                      <th>Zákazník</th>
+                      <th>Adresa</th>
+                      <th>Kdy</th>
+                      <th>Stav</th>
+                      <th>Trenér</th>
+                      <th></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {trainings.map((training) => (
+                      <tr key={training.id}>
+                        <td className="col-select">
+                          <input
+                            type="checkbox"
+                            className="table-checkbox"
+                            checked={selectedIds.has(training.id)}
+                            onChange={() => toggleSelection(training.id)}
+                            aria-label={`Vybrat školení ${training.training_type?.name || ""}`}
+                          />
+                        </td>
+                        <td>{training.training_type?.name}</td>
+                        <td>{training.customer_name || "--"}</td>
+                        <td>{training.address}</td>
+                        <td>{new Date(training.start_datetime).toLocaleString()}</td>
+                        <td>
+                          <span className="pill">{training.status_label}</span>
+                        </td>
+                        <td>
+                          {training.assigned_trainer?.display_name ||
+                            training.assigned_trainer?.name ||
+                            "--"}
+                        </td>
+                        <td>
+                          <Link className="text-link" to={`/trainings/${training.id}`}>
+                            Detail
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           ) : (
             <div className="empty-state">
               <div>

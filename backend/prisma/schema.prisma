@@ -10,6 +10,8 @@ datasource db {
 model TrainingType {
   id        Int           @id @default(autoincrement())
   name      String        @unique
+  teachingHours Float?
+  maxParticipants Int?
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   trainings Training[]

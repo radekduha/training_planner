@@ -25,3 +25,6 @@ export const patchTraining = (id, payload) =>
 
 export const importTrainings = (payload) =>
   requestJson("/trainings/import/", { method: "POST", body: payload });
+
+export const bulkDeleteTrainings = (payload) =>
+  requestJson("/trainings/bulk-delete/", { method: "POST", body: payload });

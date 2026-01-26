@@ -15,6 +15,7 @@ import TrainingDetail from "./pages/TrainingDetail.jsx";
 import TrainingForm from "./pages/TrainingForm.jsx";
 import TrainingsList from "./pages/TrainingsList.jsx";
 import TrainingTypes from "./pages/TrainingTypes.jsx";
+import TrainingTypeDetail from "./pages/TrainingTypeDetail.jsx";
 
 const App = () => {
   useEffect(() => {
@@ -36,6 +37,7 @@ const App = () => {
           <Route path="/trainers/:id" element={<TrainerDetail />} />
           <Route path="/trainers/:id/edit" element={<TrainerForm mode="edit" />} />
           <Route path="/training-types" element={<TrainingTypes />} />
+          <Route path="/training-types/:id" element={<TrainingTypeDetail />} />
           <Route path="/calendar" element={<CalendarMonth />} />
           <Route path="/calendar/week" element={<CalendarWeek />} />
           <Route path="*" element={<NotFound />} />

@@ -35,6 +35,8 @@ const parseRuleValue = (ruleValue) => {
 const trainingTypePayload = (trainingType) => ({
   id: trainingType.id,
   name: trainingType.name,
+  teaching_hours: trainingType.teachingHours ?? null,
+  max_participants: trainingType.maxParticipants ?? null,
 });
 
 const trainerFullName = (trainer) => {

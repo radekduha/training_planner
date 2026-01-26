@@ -228,6 +228,32 @@ const HEADER_ALIASES = {
     "titul za jménem",
     "suffix",
   ],
+  lecture_name: [
+    "lecture_name",
+    "lecture name",
+    "training_type",
+    "training type",
+    "typ_skoleni",
+    "typ školení",
+    "typ skoleni",
+    "typ_kurzu",
+    "typ kurzu",
+    "nazev skoleni",
+    "název školení",
+    "nazev kurzu",
+    "název kurzu",
+  ],
+  hours: ["hours", "hodiny", "pocet_hodin", "počet hodin", "pocet hodin"],
+  students: [
+    "students",
+    "participants",
+    "ucastnici",
+    "účastníci",
+    "pocet_studentu",
+    "počet studentů",
+    "pocet studentu",
+    "max_participants",
+  ],
   frequency_quantity: ["frequency_quantity", "frequency quantity", "frekvence_hodnota"],
   frequency_period: ["frequency_period", "frequency period", "frekvence_jednotka"],
   distance_limit: ["distance_limit", "distance limit", "limit_vzdalenosti"],
@@ -1022,6 +1048,56 @@ api.patch(
 );
 
 api.post(
+  "/trainings/bulk-delete/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const ids = Array.isArray(payload.ids) ? payload.ids : [];
+    if (!ids.length) {
+      return res.status(400).json({ error: "Seznam ID je povinný." });
+    }
+
+    const parsedIds = [];
+    const invalidIds = [];
+    ids.forEach((value) => {
+      const parsed = toInt(value);
+      if (!parsed) {
+        invalidIds.push(value);
+      } else {
+        parsedIds.push(parsed);
+      }
+    });
+
+    if (invalidIds.length) {
+      return res.status(400).json({ error: "Neplatná ID školení." });
+    }
+
+    const uniqueIds = Array.from(new Set(parsedIds));
+    const existing = await prisma.training.findMany({
+      where: { id: { in: uniqueIds } },
+      select: { id: true },
+    });
+    const existingIds = new Set(existing.map((item) => item.id));
+    const missingIds = uniqueIds.filter((id) => !existingIds.has(id));
+
+    if (existingIds.size) {
+      await prisma.training.deleteMany({
+        where: { id: { in: Array.from(existingIds) } },
+      });
+    }
+
+    return res.json({
+      summary: {
+        requested: uniqueIds.length,
+        deleted: existingIds.size,
+        missing: missingIds.length,
+      },
+      missing_ids: missingIds,
+    });
+  })
+);
+
+api.post(
   "/trainings/import/",
   requireAuth,
   asyncHandler(async (req, res) => {
@@ -1744,6 +1820,58 @@ api.post(
   })
 );
 
+api.post(
+  "/trainers/bulk-delete/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const ids = Array.isArray(payload.ids) ? payload.ids : [];
+    if (!ids.length) {
+      return res.status(400).json({ error: "Seznam ID je povinný." });
+    }
+
+    const parsedIds = [];
+    const invalidIds = [];
+    ids.forEach((value) => {
+      const parsed = toInt(value);
+      if (!parsed) {
+        invalidIds.push(value);
+      } else {
+        parsedIds.push(parsed);
+      }
+    });
+
+    if (invalidIds.length) {
+      return res.status(400).json({ error: "Neplatná ID trenérů." });
+    }
+
+    const uniqueIds = Array.from(new Set(parsedIds));
+    const existing = await prisma.trainer.findMany({
+      where: { id: { in: uniqueIds } },
+      select: { id: true },
+    });
+    const existingIds = new Set(existing.map((item) => item.id));
+    const missingIds = uniqueIds.filter((id) => !existingIds.has(id));
+
+    let deletedCount = 0;
+    if (existingIds.size) {
+      const result = await prisma.trainer.deleteMany({
+        where: { id: { in: Array.from(existingIds) } },
+      });
+      deletedCount = result.count;
+    }
+
+    return res.json({
+      summary: {
+        requested: uniqueIds.length,
+        deleted: deletedCount,
+        missing: missingIds.length,
+      },
+      missing_ids: missingIds,
+    });
+  })
+);
+
 api.get(
   "/trainers/:id/",
   requireAuth,
@@ -2026,8 +2154,24 @@ api.post(
     const payload = req.body || {};
     const errors = {};
     const name = (payload.name || "").trim();
+    const teachingHoursValue = payload.teaching_hours;
+    const maxParticipantsValue = payload.max_participants;
+    const teachingHours = toNumber(teachingHoursValue);
+    const maxParticipants = toInt(maxParticipantsValue);
     if (!name) {
       addError(errors, "name", "This field is required.");
+    }
+    if (teachingHoursValue !== undefined && teachingHoursValue !== "" && teachingHours === null) {
+      addError(errors, "teaching_hours", "Enter a valid number.");
+    }
+    if (teachingHours !== null && teachingHours < 0) {
+      addError(errors, "teaching_hours", "Enter a positive number.");
+    }
+    if (maxParticipantsValue !== undefined && maxParticipantsValue !== "" && maxParticipants === null) {
+      addError(errors, "max_participants", "Enter a valid number.");
+    }
+    if (maxParticipants !== null && maxParticipants < 0) {
+      addError(errors, "max_participants", "Enter a positive number.");
     }
 
     if (hasErrors(errors)) {
@@ -2039,8 +2183,528 @@ api.post(
       return res.status(400).json({ errors: { name: [{ message: "Name must be unique." }] } });
     }
 
-    const trainingType = await prisma.trainingType.create({ data: { name } });
+    const trainingType = await prisma.trainingType.create({
+      data: {
+        name,
+        teachingHours,
+        maxParticipants,
+      },
+    });
     return res.status(201).json({ item: trainingTypePayload(trainingType) });
+  })
+);
+
+api.post(
+  "/training-types/import/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const csv = payload.csv;
+    if (!csv || typeof csv !== "string") {
+      return res.status(400).json({ error: "CSV obsah je povinný." });
+    }
+
+    const text = csv.charCodeAt(0) === 0xfeff ? csv.slice(1) : csv;
+    const firstLine = text.split(/\r?\n/, 1)[0] || "";
+    const delimiter = detectDelimiter(firstLine);
+    const rows = parseCsv(text, delimiter);
+    if (!rows.length) {
+      return res.status(400).json({ error: "CSV soubor je prázdný." });
+    }
+
+    const headers = rows[0].map((header) => String(header || "").trim());
+    const headerIndex = buildHeaderIndex(headers);
+    const requiredHeaders = ["lecture_name", "first_name", "last_name"];
+    const missingHeaders = requiredHeaders.filter((key) => headerIndex[key] === undefined);
+    if (missingHeaders.length) {
+      return res.status(400).json({
+        error: `Chybí povinné sloupce: ${missingHeaders.join(", ")}.`,
+      });
+    }
+
+    const dryRun = payload.dry_run === true;
+    const errors = [];
+    let imported = 0;
+    let skipped = 0;
+
+    const getValue = (row, key) => {
+      const idx = headerIndex[key];
+      if (idx === undefined) {
+        return "";
+      }
+      return row[idx] ?? "";
+    };
+
+    const trainingTypes = await prisma.trainingType.findMany();
+    const trainingTypeIndex = new Map(
+      trainingTypes.map((item) => [normalizeHeader(item.name), item])
+    );
+
+    const trainers = await prisma.trainer.findMany({
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        titlePrefix: true,
+        titleSuffix: true,
+      },
+    });
+
+    const normalizeNameParts = (parts) =>
+      normalizeHeader(
+        parts
+          .map((part) => String(part || "").trim())
+          .filter(Boolean)
+          .join(" ")
+      );
+
+    const addTrainerIndex = (map, key, trainer) => {
+      if (!key) {
+        return;
+      }
+      const existing = map.get(key) || [];
+      existing.push(trainer);
+      map.set(key, existing);
+    };
+
+    const trainerIndexFull = new Map();
+    const trainerIndexName = new Map();
+
+    trainers.forEach((trainer) => {
+      const firstName = trainer.firstName || "";
+      const lastName = trainer.lastName || "";
+      const titlePrefix = trainer.titlePrefix || "";
+      const titleSuffix = trainer.titleSuffix || "";
+      addTrainerIndex(trainerIndexName, normalizeNameParts([firstName, lastName]), trainer);
+      addTrainerIndex(
+        trainerIndexFull,
+        normalizeNameParts([titlePrefix, firstName, lastName, titleSuffix]),
+        trainer
+      );
+    });
+
+    const ensureTrainingType = async (name) => {
+      const key = normalizeHeader(name);
+      const existing = trainingTypeIndex.get(key);
+      if (existing) {
+        return existing;
+      }
+      if (dryRun) {
+        const placeholder = { id: null, name };
+        trainingTypeIndex.set(key, placeholder);
+        return placeholder;
+      }
+      const created = await prisma.trainingType.create({ data: { name } });
+      trainingTypeIndex.set(key, created);
+      return created;
+    };
+
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i];
+      const rowNumber = i + 1;
+      if (!row || row.every((cell) => !String(cell || "").trim())) {
+        continue;
+      }
+
+      const rowErrors = [];
+      const lectureName = String(getValue(row, "lecture_name") || "").trim();
+      if (!lectureName) {
+        rowErrors.push({
+          field: "lecture_name",
+          message: "Název typu školení je povinný.",
+        });
+      }
+
+      const firstName = String(getValue(row, "first_name") || "").trim();
+      if (!firstName) {
+        rowErrors.push({ field: "first_name", message: "Jméno lektora je povinné." });
+      }
+
+      const lastName = String(getValue(row, "last_name") || "").trim();
+      if (!lastName) {
+        rowErrors.push({ field: "last_name", message: "Příjmení lektora je povinné." });
+      }
+
+      const titlePrefix = String(getValue(row, "title_prefix") || "").trim();
+      const titleSuffix = String(getValue(row, "title_suffix") || "").trim();
+
+      if (rowErrors.length) {
+        errors.push({ row: rowNumber, errors: rowErrors });
+        skipped += 1;
+        continue;
+      }
+
+      const trainingType = await ensureTrainingType(lectureName);
+
+      const fullKey = normalizeNameParts([titlePrefix, firstName, lastName, titleSuffix]);
+      const nameKey = normalizeNameParts([firstName, lastName]);
+      let matches = [];
+      if (titlePrefix || titleSuffix) {
+        matches = trainerIndexFull.get(fullKey) || [];
+      }
+      if (!matches.length) {
+        matches = trainerIndexName.get(nameKey) || [];
+      }
+
+      if (!matches.length) {
+        errors.push({
+          row: rowNumber,
+          errors: [{ field: "trainer", message: "Lektor nebyl nalezen." }],
+        });
+        skipped += 1;
+        continue;
+      }
+
+      if (matches.length > 1) {
+        errors.push({
+          row: rowNumber,
+          errors: [{ field: "trainer", message: "Nalezeno více lektorů se stejným jménem." }],
+        });
+        skipped += 1;
+        continue;
+      }
+
+      if (!dryRun && trainingType.id) {
+        await prisma.trainerSkill.upsert({
+          where: {
+            trainerId_trainingTypeId: {
+              trainerId: matches[0].id,
+              trainingTypeId: trainingType.id,
+            },
+          },
+          update: {},
+          create: {
+            trainerId: matches[0].id,
+            trainingTypeId: trainingType.id,
+          },
+        });
+      }
+
+      imported += 1;
+    }
+
+    return res.json({
+      dry_run: dryRun,
+      summary: {
+        total_rows: rows.length - 1,
+        imported,
+        skipped,
+        errors: errors.length,
+      },
+      errors,
+    });
+  })
+);
+
+api.post(
+  "/training-types/import-metrics/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const csv = payload.csv;
+    if (!csv || typeof csv !== "string") {
+      return res.status(400).json({ error: "CSV obsah je povinný." });
+    }
+
+    const text = csv.charCodeAt(0) === 0xfeff ? csv.slice(1) : csv;
+    const firstLine = text.split(/\r?\n/, 1)[0] || "";
+    const delimiter = detectDelimiter(firstLine);
+    const rows = parseCsv(text, delimiter);
+    if (!rows.length) {
+      return res.status(400).json({ error: "CSV soubor je prázdný." });
+    }
+
+    const headers = rows[0].map((header) => String(header || "").trim());
+    const headerIndex = buildHeaderIndex(headers);
+    const requiredHeaders = ["lecture_name"];
+    const missingHeaders = requiredHeaders.filter((key) => headerIndex[key] === undefined);
+    if (missingHeaders.length) {
+      return res.status(400).json({
+        error: `Chybí povinné sloupce: ${missingHeaders.join(", ")}.`,
+      });
+    }
+
+    const dryRun = payload.dry_run === true;
+    const errors = [];
+    let imported = 0;
+    let skipped = 0;
+
+    const getValue = (row, key) => {
+      const idx = headerIndex[key];
+      if (idx === undefined) {
+        return "";
+      }
+      return row[idx] ?? "";
+    };
+
+    const trainingTypes = await prisma.trainingType.findMany();
+    const trainingTypeIndex = new Map(
+      trainingTypes.map((item) => [normalizeHeader(item.name), item])
+    );
+
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i];
+      const rowNumber = i + 1;
+      if (!row || row.every((cell) => !String(cell || "").trim())) {
+        continue;
+      }
+
+      const rowErrors = [];
+      const lectureName = String(getValue(row, "lecture_name") || "").trim();
+      if (!lectureName) {
+        rowErrors.push({
+          field: "lecture_name",
+          message: "Název typu školení je povinný.",
+        });
+      }
+
+      const hoursRaw = getValue(row, "hours");
+      const studentsRaw = getValue(row, "students");
+      const hours = parseCsvNumber(hoursRaw);
+      const students = parseCsvInteger(studentsRaw);
+      const hasHours = String(hoursRaw || "").trim() !== "";
+      const hasStudents = String(studentsRaw || "").trim() !== "";
+
+      if (hasHours && hours === null) {
+        rowErrors.push({ field: "hours", message: "Neplatný počet hodin." });
+      }
+      if (hasStudents && students === null) {
+        rowErrors.push({ field: "students", message: "Neplatný počet studentů." });
+      }
+      if (!hasHours && !hasStudents) {
+        rowErrors.push({
+          field: "hours",
+          message: "Vyplňte hours nebo students.",
+        });
+      }
+      if (hours !== null && hours < 0) {
+        rowErrors.push({ field: "hours", message: "Počet hodin musí být >= 0." });
+      }
+      if (students !== null && students < 0) {
+        rowErrors.push({ field: "students", message: "Počet studentů musí být >= 0." });
+      }
+
+      const trainingType = trainingTypeIndex.get(normalizeHeader(lectureName));
+      if (!trainingType) {
+        rowErrors.push({
+          field: "lecture_name",
+          message: "Typ školení nebyl nalezen.",
+        });
+      }
+
+      if (rowErrors.length) {
+        errors.push({ row: rowNumber, errors: rowErrors });
+        skipped += 1;
+        continue;
+      }
+
+      if (!dryRun && trainingType) {
+        const data = {};
+        if (hasHours) {
+          data.teachingHours = hours;
+        }
+        if (hasStudents) {
+          data.maxParticipants = students;
+        }
+        await prisma.trainingType.update({
+          where: { id: trainingType.id },
+          data,
+        });
+      }
+
+      imported += 1;
+    }
+
+    return res.json({
+      dry_run: dryRun,
+      summary: {
+        total_rows: rows.length - 1,
+        imported,
+        skipped,
+        errors: errors.length,
+      },
+      errors,
+    });
+  })
+);
+
+api.post(
+  "/training-types/bulk-delete/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const ids = Array.isArray(payload.ids) ? payload.ids : [];
+    if (!ids.length) {
+      return res.status(400).json({ error: "Seznam ID je povinný." });
+    }
+
+    const parsedIds = [];
+    const invalidIds = [];
+    ids.forEach((value) => {
+      const parsed = toInt(value);
+      if (!parsed) {
+        invalidIds.push(value);
+      } else {
+        parsedIds.push(parsed);
+      }
+    });
+
+    if (invalidIds.length) {
+      return res.status(400).json({ error: "Neplatná ID typů školení." });
+    }
+
+    const uniqueIds = Array.from(new Set(parsedIds));
+    const existing = await prisma.trainingType.findMany({
+      where: { id: { in: uniqueIds } },
+      select: { id: true },
+    });
+    const existingIds = new Set(existing.map((item) => item.id));
+    const missingIds = uniqueIds.filter((id) => !existingIds.has(id));
+
+    const usedTrainings = await prisma.training.findMany({
+      where: { trainingTypeId: { in: Array.from(existingIds) } },
+      select: { trainingTypeId: true },
+    });
+    const blockedIds = Array.from(
+      new Set(usedTrainings.map((item) => item.trainingTypeId))
+    );
+    const blockedSet = new Set(blockedIds);
+    const deletableIds = Array.from(existingIds).filter((id) => !blockedSet.has(id));
+
+    let deletedCount = 0;
+    if (deletableIds.length) {
+      const result = await prisma.trainingType.deleteMany({
+        where: { id: { in: deletableIds } },
+      });
+      deletedCount = result.count;
+    }
+
+    return res.json({
+      summary: {
+        requested: uniqueIds.length,
+        deleted: deletedCount,
+        blocked: blockedIds.length,
+        missing: missingIds.length,
+      },
+      blocked_ids: blockedIds,
+      missing_ids: missingIds,
+    });
+  })
+);
+
+api.put(
+  "/training-types/:id/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = toInt(req.params.id);
+    if (!id) {
+      return res.status(404).json({ error: "Training type not found." });
+    }
+
+    const trainingType = await prisma.trainingType.findUnique({ where: { id } });
+    if (!trainingType) {
+      return res.status(404).json({ error: "Training type not found." });
+    }
+
+    const payload = req.body || {};
+    const errors = {};
+    const name = (payload.name || "").trim();
+    const teachingHoursValue = payload.teaching_hours;
+    const maxParticipantsValue = payload.max_participants;
+    const teachingHours =
+      teachingHoursValue === undefined ? trainingType.teachingHours : toNumber(teachingHoursValue);
+    const maxParticipants =
+      maxParticipantsValue === undefined
+        ? trainingType.maxParticipants
+        : toInt(maxParticipantsValue);
+    if (!name) {
+      addError(errors, "name", "This field is required.");
+    }
+    if (teachingHoursValue !== undefined && teachingHoursValue !== "" && teachingHours === null) {
+      addError(errors, "teaching_hours", "Enter a valid number.");
+    }
+    if (teachingHours !== null && teachingHours < 0) {
+      addError(errors, "teaching_hours", "Enter a positive number.");
+    }
+    if (maxParticipantsValue !== undefined && maxParticipantsValue !== "" && maxParticipants === null) {
+      addError(errors, "max_participants", "Enter a valid number.");
+    }
+    if (maxParticipants !== null && maxParticipants < 0) {
+      addError(errors, "max_participants", "Enter a positive number.");
+    }
+
+    const existing = await prisma.trainingType.findUnique({ where: { name } });
+    if (existing && existing.id !== id) {
+      addError(errors, "name", "Name must be unique.");
+    }
+
+    if (hasErrors(errors)) {
+      return res.status(400).json({ errors });
+    }
+
+    const updatedType = await prisma.trainingType.update({
+      where: { id },
+      data: {
+        name,
+        teachingHours,
+        maxParticipants,
+      },
+    });
+    return res.json({ item: trainingTypePayload(updatedType) });
+  })
+);
+
+api.get(
+  "/training-types/:id/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = toInt(req.params.id);
+    if (!id) {
+      return res.status(404).json({ error: "Training type not found." });
+    }
+
+    const trainingType = await prisma.trainingType.findUnique({ where: { id } });
+    if (!trainingType) {
+      return res.status(404).json({ error: "Training type not found." });
+    }
+
+    const trainers = await prisma.trainer.findMany({
+      where: {
+        skills: { some: { trainingTypeId: id } },
+      },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    });
+
+    return res.json({
+      item: trainingTypePayload(trainingType),
+      trainers: trainers.map(trainerSummary),
+    });
+  })
+);
+
+api.delete(
+  "/training-types/:id/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = toInt(req.params.id);
+    if (!id) {
+      return res.status(404).json({ error: "Training type not found." });
+    }
+
+    const trainingType = await prisma.trainingType.findUnique({ where: { id } });
+    if (!trainingType) {
+      return res.status(404).json({ error: "Training type not found." });
+    }
+
+    const linkedTrainings = await prisma.training.count({ where: { trainingTypeId: id } });
+    if (linkedTrainings > 0) {
+      return res
+        .status(400)
+        .json({ error: "Training type is used by trainings and cannot be deleted." });
+    }
+
+    await prisma.trainingType.delete({ where: { id } });
+    return res.json({ ok: true });
   })
 );
 
