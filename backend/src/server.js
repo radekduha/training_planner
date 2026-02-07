@@ -206,6 +206,8 @@ const parseBoolean = (value) => {
   return null;
 };
 
+const hasInputValue = (value) => value !== undefined && value !== null && value !== "";
+
 const parseWindowRange = (payload = {}, errors = {}) => {
   const now = new Date();
   const defaultStart = startOfDay(now);
@@ -960,11 +962,11 @@ api.post(
     }
 
     const homeLat = toNumber(payload.home_lat);
-    if (payload.home_lat !== undefined && payload.home_lat !== "" && homeLat === null) {
+    if (hasInputValue(payload.home_lat) && homeLat === null) {
       addError(errors, "home_lat", "Enter a valid latitude.");
     }
     const homeLng = toNumber(payload.home_lng);
-    if (payload.home_lng !== undefined && payload.home_lng !== "" && homeLng === null) {
+    if (hasInputValue(payload.home_lng) && homeLng === null) {
       addError(errors, "home_lng", "Enter a valid longitude.");
     }
 
@@ -1111,11 +1113,11 @@ api.put(
     }
 
     const homeLat = toNumber(payload.home_lat);
-    if (payload.home_lat !== undefined && payload.home_lat !== "" && homeLat === null) {
+    if (hasInputValue(payload.home_lat) && homeLat === null) {
       addError(errors, "home_lat", "Enter a valid latitude.");
     }
     const homeLng = toNumber(payload.home_lng);
-    if (payload.home_lng !== undefined && payload.home_lng !== "" && homeLng === null) {
+    if (hasInputValue(payload.home_lng) && homeLng === null) {
       addError(errors, "home_lng", "Enter a valid longitude.");
     }
 
@@ -1323,12 +1325,12 @@ api.post(
     }
 
     const lat = toNumber(payload.lat);
-    if (payload.lat !== undefined && payload.lat !== "" && lat === null) {
+    if (hasInputValue(payload.lat) && lat === null) {
       addError(errors, "lat", "Enter a valid latitude.");
     }
 
     const lng = toNumber(payload.lng);
-    if (payload.lng !== undefined && payload.lng !== "" && lng === null) {
+    if (hasInputValue(payload.lng) && lng === null) {
       addError(errors, "lng", "Enter a valid longitude.");
     }
 

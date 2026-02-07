@@ -231,6 +231,27 @@ test("default 30-day window and slot recommendations", async () => {
   assert.ok((detail.recommendations.matches || []).length > 0, "Expected at least one recommendation");
 });
 
+test("training creation accepts null coordinates and extracts them from map URL", async () => {
+  await resetData();
+  const api = new ApiClient();
+  await api.login();
+
+  const topic = await createTopic(api, "Critical Topic URL", 120);
+
+  const created = await createRequest(api, {
+    training_type: String(topic.id),
+    customer_name: "Org URL",
+    address: "https://www.google.com/maps/@50.0755381,14.4378005,15z",
+    lat: null,
+    lng: null,
+  });
+
+  assert.equal(typeof created.lat, "number", "Expected resolved latitude");
+  assert.equal(typeof created.lng, "number", "Expected resolved longitude");
+  assert.ok(Math.abs(created.lat - 50.0755381) < 1e-6, `Unexpected latitude: ${created.lat}`);
+  assert.ok(Math.abs(created.lng - 14.4378005) < 1e-6, `Unexpected longitude: ${created.lng}`);
+});
+
 test("concurrent assignment conflict and slot release on open/cancel", async () => {
   await resetData();
   const api = new ApiClient();
