@@ -11,6 +11,7 @@ node_modules/
 dist/
 build/
 tmp/
+backend/public/
 
 .DS_Store
 .idea/
