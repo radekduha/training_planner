@@ -1,15 +1,17 @@
 # User stories
 
 ## Must have
-- As the owner, I can create a training with time and address so I can start planning.
-- As the owner, I can add trainers with their rules so the system can recommend them.
-- As the owner, I can see recommended trainers with reasons so I can decide quickly.
-- As the owner, I can assign a trainer and change the status so the schedule is up to date.
-- As the owner, I can edit or cancel a training so the plan stays accurate.
+- As an internal planner, I can create a training request with topic, location, and optional time window so matching can start.
+- As an internal planner, if I do not provide a time window, the system uses the next 30 days by default.
+- As an internal planner, I can maintain trainer topic skills and exact availability slots so the system matches only real capacity.
+- As an internal planner, I can see ranked trainer+slot candidates with match percentage and reason so I can decide quickly.
+- As an internal planner, I can assign a trainer to a concrete slot and reserve it immediately without hold.
+- As an internal planner, I see assignment changes from colleagues in real time to avoid collisions.
+- As an internal planner, I get a conflict warning if a slot was taken just before save so I can pick another candidate.
 
 ## Should have
-- As the owner, I can filter trainings by date, status, and type to find items fast.
-- As the owner, I can see monthly workload per trainer to avoid overload.
+- As an internal planner, I can see monthly offered vs delivered days per trainer to keep proportional fairness.
+- As an internal planner, I can filter requests by status, topic, and date to find work quickly.
 
 ## Could have
-- As the owner, I can duplicate a training to save time on repeats.
+- As an internal planner, I can duplicate a request to speed up recurring demand.

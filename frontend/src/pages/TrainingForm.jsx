@@ -12,12 +12,12 @@ const emptyForm = {
   address: "",
   lat: "",
   lng: "",
-  start_datetime: "",
-  end_datetime: "",
-  status: "waiting",
-  assigned_trainer: "",
+  request_window_start: "",
+  request_window_end: "",
+  status: "open",
   notes: "",
   assignment_reason: "",
+  updated_at: "",
 };
 
 const toLocalInput = (value) => {
@@ -37,7 +37,6 @@ const TrainingForm = ({ mode }) => {
   const [meta, setMeta] = useState({
     status_choices: [],
     training_types: [],
-    trainer_choices: [],
   });
   const [formState, setFormState] = useState(emptyForm);
   const [loading, setLoading] = useState(isEdit);
@@ -47,9 +46,9 @@ const TrainingForm = ({ mode }) => {
 
   const pageTitle = useMemo(() => {
     if (isEdit) {
-      return `Upravit školení #${id}`;
+      return `Upravit poptávku #${id}`;
     }
-    return "Nové školení";
+    return "Nová poptávka";
   }, [isEdit, id]);
 
   useEffect(() => {
@@ -58,7 +57,6 @@ const TrainingForm = ({ mode }) => {
         setMeta({
           status_choices: data.status_choices || [],
           training_types: data.training_types || [],
-          trainer_choices: data.trainer_choices || [],
         });
       })
       .catch(() => {});
@@ -78,12 +76,12 @@ const TrainingForm = ({ mode }) => {
           address: item.address || "",
           lat: item.lat ?? "",
           lng: item.lng ?? "",
-          start_datetime: toLocalInput(item.start_datetime),
-          end_datetime: toLocalInput(item.end_datetime),
-          status: item.status || "waiting",
-          assigned_trainer: item.assigned_trainer?.id || "",
+          request_window_start: toLocalInput(item.request_window_start),
+          request_window_end: toLocalInput(item.request_window_end),
+          status: item.status || "open",
           notes: item.notes || "",
           assignment_reason: item.assignment_reason || "",
+          updated_at: item.updated_at || "",
         });
       })
       .catch((err) => {
@@ -102,24 +100,23 @@ const TrainingForm = ({ mode }) => {
     setSaving(true);
     setFormError(null);
     setFieldErrors({});
+
     const payload = {
       training_type: formState.training_type,
       customer_name: formState.customer_name,
       address: formState.address,
       lat: formState.lat === "" ? null : Number(formState.lat),
       lng: formState.lng === "" ? null : Number(formState.lng),
-      start_datetime: formState.start_datetime,
-      end_datetime: formState.end_datetime,
+      request_window_start: formState.request_window_start || null,
+      request_window_end: formState.request_window_end || null,
       status: formState.status,
-      assigned_trainer: formState.assigned_trainer || null,
       notes: formState.notes,
       assignment_reason: formState.assignment_reason,
+      updated_at: formState.updated_at || undefined,
     };
 
     try {
-      const data = isEdit
-        ? await updateTraining(id, payload)
-        : await createTraining(payload);
+      const data = isEdit ? await updateTraining(id, payload) : await createTraining(payload);
       navigate(`/trainings/${data.item.id}`);
     } catch (err) {
       setFormError(err.message);
@@ -138,7 +135,7 @@ const TrainingForm = ({ mode }) => {
   if (loading) {
     return (
       <section className="stack">
-        <p className="muted">Načítání školení...</p>
+        <p className="muted">Načítání poptávky...</p>
       </section>
     );
   }
@@ -147,7 +144,7 @@ const TrainingForm = ({ mode }) => {
     <section className="stack">
       <PageHeader
         title={pageTitle}
-        subtitle="Zadejte údaje pro přiřazení správného trenéra."
+        subtitle="Zadejte téma, lokalitu a časové okno. Pokud okno necháte prázdné, použije se dalších 30 dní."
         actions={
           isEdit ? (
             <Link className="btn btn-ghost" to={`/trainings/${id}`}>
@@ -157,7 +154,7 @@ const TrainingForm = ({ mode }) => {
         }
       />
       <form className="card form" onSubmit={onSubmit}>
-        <FormField label="Typ školení" htmlFor="training_type" error={fieldErrors.training_type}>
+        <FormField label="Téma" htmlFor="training_type" error={fieldErrors.training_type}>
           <select
             id="training_type"
             name="training_type"
@@ -165,7 +162,7 @@ const TrainingForm = ({ mode }) => {
             onChange={onChange}
             required
           >
-            <option value="">Vyberte typ</option>
+            <option value="">Vyberte téma</option>
             {meta.training_types.map((type) => (
               <option key={type.id} value={type.id}>
                 {type.name}
@@ -173,7 +170,8 @@ const TrainingForm = ({ mode }) => {
             ))}
           </select>
         </FormField>
-        <FormField label="Zákazník" htmlFor="customer_name" error={fieldErrors.customer_name}>
+
+        <FormField label="Organizace" htmlFor="customer_name" error={fieldErrors.customer_name}>
           <input
             id="customer_name"
             name="customer_name"
@@ -181,40 +179,41 @@ const TrainingForm = ({ mode }) => {
             onChange={onChange}
           />
         </FormField>
-        <FormField label="Adresa" htmlFor="address" error={fieldErrors.address}>
+
+        <FormField label="Lokalita (prezenčně)" htmlFor="address" error={fieldErrors.address}>
           <input id="address" name="address" value={formState.address} onChange={onChange} required />
         </FormField>
+
         <div className="form-grid">
-          <FormField label="Zeměpisná šířka" htmlFor="lat" hint="Volitelné" error={fieldErrors.lat}>
+          <FormField label="Okno od" htmlFor="request_window_start" error={fieldErrors.request_window_start}>
+            <input
+              id="request_window_start"
+              name="request_window_start"
+              type="datetime-local"
+              value={formState.request_window_start}
+              onChange={onChange}
+            />
+          </FormField>
+          <FormField label="Okno do" htmlFor="request_window_end" error={fieldErrors.request_window_end}>
+            <input
+              id="request_window_end"
+              name="request_window_end"
+              type="datetime-local"
+              value={formState.request_window_end}
+              onChange={onChange}
+            />
+          </FormField>
+        </div>
+
+        <div className="form-grid">
+          <FormField label="Souřadnice lat" htmlFor="lat" hint="Volitelné" error={fieldErrors.lat}>
             <input id="lat" name="lat" value={formState.lat} onChange={onChange} />
           </FormField>
-          <FormField label="Zeměpisná délka" htmlFor="lng" hint="Volitelné" error={fieldErrors.lng}>
+          <FormField label="Souřadnice lng" htmlFor="lng" hint="Volitelné" error={fieldErrors.lng}>
             <input id="lng" name="lng" value={formState.lng} onChange={onChange} />
           </FormField>
         </div>
-        <p className="hint">Pokud je máte, přidejte souřadnice pro lepší doporučení.</p>
-        <div className="form-grid">
-          <FormField label="Začátek" htmlFor="start_datetime" error={fieldErrors.start_datetime}>
-            <input
-              id="start_datetime"
-              name="start_datetime"
-              type="datetime-local"
-              value={formState.start_datetime}
-              onChange={onChange}
-              required
-            />
-          </FormField>
-          <FormField label="Konec" htmlFor="end_datetime" error={fieldErrors.end_datetime}>
-            <input
-              id="end_datetime"
-              name="end_datetime"
-              type="datetime-local"
-              value={formState.end_datetime}
-              onChange={onChange}
-              required
-            />
-          </FormField>
-        </div>
+
         <FormField label="Stav" htmlFor="status" error={fieldErrors.status}>
           <select id="status" name="status" value={formState.status} onChange={onChange}>
             {meta.status_choices.map((choice) => (
@@ -224,27 +223,15 @@ const TrainingForm = ({ mode }) => {
             ))}
           </select>
         </FormField>
-        <FormField label="Přiřazený trenér" htmlFor="assigned_trainer">
-          <select
-            id="assigned_trainer"
-            name="assigned_trainer"
-            value={formState.assigned_trainer}
-            onChange={onChange}
-          >
-            <option value="">Nepřiřazeno</option>
-            {meta.trainer_choices.map((trainer) => (
-              <option key={trainer.id} value={trainer.id}>
-                {trainer.display_name || trainer.name}
-              </option>
-            ))}
-          </select>
-        </FormField>
+
         <FormField label="Poznámky" htmlFor="notes" error={fieldErrors.notes}>
           <textarea id="notes" name="notes" value={formState.notes} onChange={onChange} />
         </FormField>
+
         <FormField
           label="Důvod přiřazení"
           htmlFor="assignment_reason"
+          hint="Volitelné. Při přiřazení ze seznamu kandidátů se doplní automaticky."
           error={fieldErrors.assignment_reason}
         >
           <textarea
@@ -254,10 +241,12 @@ const TrainingForm = ({ mode }) => {
             onChange={onChange}
           />
         </FormField>
+
         {formError ? <p className="error">{formError}</p> : null}
+
         <div className="inline-actions">
           <button className="btn" type="submit" disabled={saving}>
-            {saving ? "Ukládám..." : isEdit ? "Uložit změny" : "Uložit školení"}
+            {saving ? "Ukládám..." : isEdit ? "Uložit změny" : "Uložit poptávku"}
           </button>
           <Link className="btn btn-ghost" to={isEdit ? `/trainings/${id}` : "/trainings"}>
             Zrušit

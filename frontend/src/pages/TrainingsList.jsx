@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { fetchMeta } from "../api/meta.js";
-import { bulkDeleteTrainings, fetchTrainings, importTrainings } from "../api/trainings.js";
+import { fetchTrainings } from "../api/trainings.js";
 import PageHeader from "../components/PageHeader.jsx";
+import useRealtimeInvalidate from "../hooks/useRealtimeInvalidate.js";
+
+const PAGE_LIMIT = 50;
 
 const emptyFilters = {
   status: "",
@@ -13,40 +16,72 @@ const emptyFilters = {
   no_trainer: false,
 };
 
+const formatDateTime = (value) => {
+  if (!value) {
+    return "--";
+  }
+  return new Date(value).toLocaleString("cs-CZ", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const formatWindow = (item) => {
+  const start = item.request_window_start;
+  const end = item.request_window_end;
+  if (!start && !end) {
+    return "--";
+  }
+  return `${formatDateTime(start)} -> ${formatDateTime(end)}`;
+};
+
 const TrainingsList = () => {
   const [filters, setFilters] = useState(emptyFilters);
   const [meta, setMeta] = useState({ status_choices: [], training_types: [] });
   const [trainings, setTrainings] = useState([]);
+  const [nextCursor, setNextCursor] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
-  const [importFile, setImportFile] = useState(null);
-  const [importing, setImporting] = useState(false);
-  const [importError, setImportError] = useState(null);
-  const [importResult, setImportResult] = useState(null);
-  const [dryRun, setDryRun] = useState(true);
-  const [isImportOpen, setIsImportOpen] = useState(false);
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [bulkError, setBulkError] = useState(null);
-  const selectAllRef = useRef(null);
 
-  const loadTrainings = async (activeFilters) => {
-    setLoading(true);
-    setError(null);
+  const loadTrainings = useCallback(async (activeFilters, options = {}) => {
+    const { append = false, cursor = null } = options;
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+      setError(null);
+    }
+
     try {
       const payload = {
         ...activeFilters,
         no_trainer: activeFilters.no_trainer ? "1" : "",
+        limit: PAGE_LIMIT,
+        cursor,
       };
       const data = await fetchTrainings(payload);
-      setTrainings(data.items || []);
-      setSelectedIds(new Set());
+      const incoming = data.items || [];
+
+      if (append) {
+        setTrainings((prev) => [...prev, ...incoming]);
+      } else {
+        setTrainings(incoming);
+      }
+      setNextCursor(data.next_cursor || null);
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (append) {
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchMeta()
@@ -58,45 +93,13 @@ const TrainingsList = () => {
       })
       .catch(() => {});
     loadTrainings(emptyFilters);
-  }, []);
+  }, [loadTrainings]);
 
-  useEffect(() => {
-    if (!selectAllRef.current) {
-      return;
-    }
-    const isAllSelected = trainings.length > 0 && selectedIds.size === trainings.length;
-    selectAllRef.current.indeterminate =
-      selectedIds.size > 0 && !isAllSelected && trainings.length > 0;
-  }, [selectedIds, trainings]);
-
-  const onFileChange = (event) => {
-    const file = event.target.files?.[0] || null;
-    setImportFile(file);
-    setImportError(null);
-    setImportResult(null);
-  };
-
-  const onImport = async () => {
-    if (!importFile) {
-      setImportError("Vyberte CSV soubor.");
-      return;
-    }
-    setImporting(true);
-    setImportError(null);
-    setImportResult(null);
-    try {
-      const csv = await importFile.text();
-      const data = await importTrainings({ csv, dry_run: dryRun });
-      setImportResult(data);
-      if (!dryRun && data.summary?.imported) {
-        loadTrainings(filters);
-      }
-    } catch (err) {
-      setImportError(err.message);
-    } finally {
-      setImporting(false);
-    }
-  };
+  useRealtimeInvalidate(
+    useCallback(() => {
+      loadTrainings(filters);
+    }, [filters, loadTrainings])
+  );
 
   const onFilterChange = (event) => {
     const { name, value, type, checked } = event.target;
@@ -116,152 +119,24 @@ const TrainingsList = () => {
     loadTrainings(emptyFilters);
   };
 
-  const toggleSelectAll = () => {
-    setBulkError(null);
-    setSelectedIds((prev) => {
-      if (trainings.length === 0) {
-        return new Set();
-      }
-      if (prev.size === trainings.length) {
-        return new Set();
-      }
-      return new Set(trainings.map((item) => item.id));
-    });
-  };
-
-  const toggleSelection = (id) => {
-    setBulkError(null);
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  const onBulkDelete = async () => {
-    if (!selectedIds.size) {
+  const onLoadMore = () => {
+    if (!nextCursor || loadingMore) {
       return;
     }
-    const count = selectedIds.size;
-    if (!window.confirm(`Opravdu chcete smazat ${count} vybraných školení?`)) {
-      return;
-    }
-    setBulkDeleting(true);
-    setBulkError(null);
-    try {
-      await bulkDeleteTrainings({ ids: Array.from(selectedIds) });
-      await loadTrainings(filters);
-    } catch (err) {
-      setBulkError(err.message);
-    } finally {
-      setBulkDeleting(false);
-    }
+    loadTrainings(filters, { append: true, cursor: nextCursor });
   };
-
-  const isAllSelected = trainings.length > 0 && selectedIds.size === trainings.length;
 
   return (
     <section className="stack">
       <PageHeader
-        title="Školení"
-        subtitle="Filtrujte a prohlížejte všechna plánovaná školení."
+        title="Poptávky školení"
+        subtitle="Plánování podle časového okna a dostupných slotů trenérů."
         actions={
-          <>
-            <button
-              className="btn btn-ghost"
-              type="button"
-              onClick={() => setIsImportOpen(true)}
-            >
-              CSV import
-            </button>
-            <Link className="btn btn-primary" to="/trainings/new">
-              Nové školení
-            </Link>
-          </>
+          <Link className="btn btn-primary" to="/trainings/new">
+            Nová poptávka
+          </Link>
         }
       />
-      {isImportOpen ? (
-        <div
-          className="modal-overlay"
-          role="presentation"
-          onClick={() => setIsImportOpen(false)}
-        >
-          <div
-            className="modal card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="csv-import-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="modal-header">
-              <h3 id="csv-import-title">Import školení (CSV)</h3>
-              <button
-                className="btn btn-ghost btn-icon"
-                type="button"
-                onClick={() => setIsImportOpen(false)}
-                aria-label="Zavřít"
-              >
-                x
-              </button>
-            </div>
-            <p className="muted">
-              Povinné sloupce: start_date, training_name, start_time, end_time. Místo školení
-              vyplňte přes training_place nebo payer_address. Ostatní sloupce jsou volitelné.
-            </p>
-            <div className="stack">
-              <input type="file" accept=".csv,text/csv" onChange={onFileChange} />
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={dryRun}
-                  onChange={(event) => setDryRun(event.target.checked)}
-                />
-                Pouze kontrola (bez uložení)
-              </label>
-              <button className="btn" type="button" onClick={onImport} disabled={importing}>
-                {importing ? "Importuji..." : "Importovat"}
-              </button>
-            </div>
-            {importError ? <p className="error">{importError}</p> : null}
-            {importResult ? (
-              <div className="stack">
-                <p className="muted">
-                  {importResult.dry_run ? "Kontrola dokončena." : "Import dokončen."}
-                </p>
-                <div className="pill-row">
-                  <span className="pill">Řádků: {importResult.summary?.total_rows ?? 0}</span>
-                  <span className="pill">
-                    Importováno: {importResult.summary?.imported ?? 0}
-                  </span>
-                  <span className="pill">
-                    Přeskočeno: {importResult.summary?.skipped ?? 0}
-                  </span>
-                  <span className="pill">Chyby: {importResult.summary?.errors ?? 0}</span>
-                </div>
-                {importResult.errors?.length ? (
-                  <div className="error">
-                    {importResult.errors.slice(0, 10).map((item) => (
-                      <div key={`row-${item.row}`}>
-                        Řádek {item.row}:{" "}
-                        {(item.errors || [])
-                          .map((err) => `${err.field}: ${err.message}`)
-                          .join(", ")}
-                      </div>
-                    ))}
-                    {importResult.errors.length > 10 ? (
-                      <div>Další chyby: {importResult.errors.length - 10}</div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
       <div className="grid">
         <div className="card">
           <h2>Filtry</h2>
@@ -279,7 +154,7 @@ const TrainingsList = () => {
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="training_type">Typ školení</label>
+                <label htmlFor="training_type">Téma</label>
                 <select
                   id="training_type"
                   name="training_type"
@@ -295,7 +170,7 @@ const TrainingsList = () => {
                 </select>
               </div>
               <div className="field">
-                <label htmlFor="start_date">Datum od</label>
+                <label htmlFor="start_date">Okno od</label>
                 <input
                   id="start_date"
                   name="start_date"
@@ -305,7 +180,7 @@ const TrainingsList = () => {
                 />
               </div>
               <div className="field">
-                <label htmlFor="end_date">Datum do</label>
+                <label htmlFor="end_date">Okno do</label>
                 <input
                   id="end_date"
                   name="end_date"
@@ -319,7 +194,7 @@ const TrainingsList = () => {
                   Použít
                 </button>
                 <button className="btn btn-ghost" type="button" onClick={onReset}>
-                  Resetovat
+                  Reset
                 </button>
               </div>
             </div>
@@ -330,51 +205,27 @@ const TrainingsList = () => {
                 checked={filters.no_trainer}
                 onChange={onFilterChange}
               />
-              Bez trenéra (koncept + čeká)
+              Bez přiřazeného trenéra
             </label>
           </form>
         </div>
+
         <div className="card">
           {loading ? (
-            <p className="muted">Načítání školení...</p>
+            <p className="muted">Načítání poptávek...</p>
           ) : error ? (
             <p className="error">{error}</p>
           ) : trainings.length ? (
             <>
-              <div className="bulk-actions">
-                <div className="bulk-select">
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    className="table-checkbox"
-                    checked={isAllSelected}
-                    onChange={toggleSelectAll}
-                    aria-label="Vybrat všechna školení"
-                  />
-                  <span className="muted">Vybrat vše</span>
-                </div>
-                <div className="inline-actions">
-                  <span className="muted">Vybráno: {selectedIds.size}</span>
-                  <button
-                    className="btn btn-ghost btn-danger"
-                    type="button"
-                    onClick={onBulkDelete}
-                    disabled={!selectedIds.size || bulkDeleting}
-                  >
-                    {bulkDeleting ? "Mažu..." : "Smazat"}
-                  </button>
-                </div>
-                {bulkError ? <p className="error">{bulkError}</p> : null}
-              </div>
               <div className="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th className="col-select"></th>
-                      <th>Typ</th>
-                      <th>Zákazník</th>
-                      <th>Adresa</th>
-                      <th>Kdy</th>
+                      <th>Téma</th>
+                      <th>Organizace</th>
+                      <th>Lokalita</th>
+                      <th>Časové okno</th>
+                      <th>Přiřazený slot</th>
                       <th>Stav</th>
                       <th>Trenér</th>
                       <th></th>
@@ -383,19 +234,17 @@ const TrainingsList = () => {
                   <tbody>
                     {trainings.map((training) => (
                       <tr key={training.id}>
-                        <td className="col-select">
-                          <input
-                            type="checkbox"
-                            className="table-checkbox"
-                            checked={selectedIds.has(training.id)}
-                            onChange={() => toggleSelection(training.id)}
-                            aria-label={`Vybrat školení ${training.training_type?.name || ""}`}
-                          />
-                        </td>
-                        <td>{training.training_type?.name}</td>
+                        <td>{training.training_type?.name || "--"}</td>
                         <td>{training.customer_name || "--"}</td>
-                        <td>{training.address}</td>
-                        <td>{new Date(training.start_datetime).toLocaleString()}</td>
+                        <td>{training.address || "--"}</td>
+                        <td>{formatWindow(training)}</td>
+                        <td>
+                          {training.assigned_start_datetime
+                            ? `${formatDateTime(training.assigned_start_datetime)} -> ${formatDateTime(
+                                training.assigned_end_datetime
+                              )}`
+                            : "--"}
+                        </td>
                         <td>
                           <span className="pill">{training.status_label}</span>
                         </td>
@@ -414,15 +263,22 @@ const TrainingsList = () => {
                   </tbody>
                 </table>
               </div>
+              {nextCursor ? (
+                <div className="inline-actions">
+                  <button className="btn btn-ghost" type="button" onClick={onLoadMore} disabled={loadingMore}>
+                    {loadingMore ? "Načítám..." : "Načíst další"}
+                  </button>
+                </div>
+              ) : null}
             </>
           ) : (
             <div className="empty-state">
               <div>
-                <h3>Zatím žádná školení</h3>
-                <p>Vytvořte první školení a začněte přiřazovat trenéry.</p>
+                <h3>Zatím žádné poptávky</h3>
+                <p>Vytvořte první poptávku a systém nabídne trenéry se sloty.</p>
               </div>
               <Link className="btn" to="/trainings/new">
-                Přidat školení
+                Nová poptávka
               </Link>
             </div>
           )}

@@ -10,6 +10,7 @@ datasource db {
 model TrainingType {
   id        Int           @id @default(autoincrement())
   name      String        @unique
+  durationMinutes Int     @default(240)
   teachingHours Float?
   maxParticipants Int?
   createdAt DateTime      @default(now())
@@ -42,6 +43,7 @@ model Trainer {
   skills         TrainerSkill[]
   rules          TrainerRule[]
   assignedTrainings Training[]
+  availabilitySlots TrainerAvailabilitySlot[]
 }
 
 model TrainerSkill {
@@ -71,11 +73,14 @@ model Training {
   address          String
   lat              Float?
   lng              Float?
+  requestWindowStart DateTime?
+  requestWindowEnd DateTime?
   startDatetime    DateTime
   endDatetime      DateTime
   status           String
   assignedTrainerId Int?
   assignmentReason String?
+  changedBy        String?
   googleEventId    String?
   notes            String?
   visitors         Int?
@@ -99,10 +104,28 @@ model Training {
   updatedAt        DateTime     @updatedAt
   trainingType     TrainingType @relation(fields: [trainingTypeId], references: [id], onDelete: Restrict)
   assignedTrainer  Trainer?     @relation(fields: [assignedTrainerId], references: [id], onDelete: SetNull)
+  assignedSlot     TrainerAvailabilitySlot? @relation("AssignedTrainingSlot")
 
   @@index([startDatetime])
   @@index([status])
   @@index([assignedTrainerId])
+  @@index([requestWindowStart, requestWindowEnd])
+}
+
+model TrainerAvailabilitySlot {
+  id               Int      @id @default(autoincrement())
+  trainerId        Int
+  startDatetime    DateTime
+  endDatetime      DateTime
+  isActive         Boolean  @default(true)
+  assignedTrainingId Int?   @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  trainer          Trainer  @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  assignedTraining Training? @relation("AssignedTrainingSlot", fields: [assignedTrainingId], references: [id], onDelete: SetNull)
+
+  @@index([trainerId, startDatetime, endDatetime])
+  @@index([isActive, startDatetime])
 }
 
 model GeocodingCache {

@@ -1,13 +1,14 @@
 # Data model (MVP)
 
 ## Enums
-- Training status: `draft`, `waiting`, `assigned`, `confirmed`, `canceled`
+- Request status: `draft`, `open`, `assigned`, `confirmed`, `canceled`
 
 ## Tables
 
-### training_type
+### topic
 - id
 - name
+- duration_minutes
 - created_at
 - updated_at
 
@@ -16,11 +17,6 @@
 - name
 - email
 - phone
-- home_address
-- home_lat
-- home_lng
-- hourly_rate
-- travel_rate_km
 - notes
 - created_at
 - updated_at
@@ -28,33 +24,50 @@
 ### trainer_skill
 - id
 - trainer_id
-- training_type_id
+- topic_id
 
-### trainer_rule
+### trainer_availability_slot
 - id
 - trainer_id
-- rule_type
-- rule_value (JSON)
-
-### training
-- id
-- training_type_id
-- customer_name
-- address
-- lat
-- lng
 - start_datetime
 - end_datetime
+- is_active
+- created_at
+- updated_at
+
+### training_request
+- id
+- topic_id
+- customer_name
+- location_text
+- window_start (nullable)
+- window_end (nullable)
 - status
-- assigned_trainer_id (nullable)
-- assignment_reason
-- google_event_id (nullable)
 - notes
 - created_at
 - updated_at
 
+### training_assignment
+- id
+- training_request_id
+- trainer_id
+- slot_id
+- assigned_start_datetime
+- assigned_end_datetime
+- assignment_reason
+- changed_by
+- created_at
+- updated_at
+
+## Derived metrics (monthly)
+- offered_days per trainer (from availability slots)
+- delivered_days per trainer (from assignments)
+- target_share and actual_share for fairness
+
 ## Indexes
-- `training(start_datetime)`
-- `training(status)`
-- `training(assigned_trainer_id)`
-- `trainer_skill(trainer_id, training_type_id)`
+- `training_request(status)`
+- `training_request(window_start, window_end)`
+- `trainer_skill(trainer_id, topic_id)`
+- `trainer_availability_slot(trainer_id, start_datetime, end_datetime)`
+- `training_assignment(training_request_id)`
+- `training_assignment(slot_id)`

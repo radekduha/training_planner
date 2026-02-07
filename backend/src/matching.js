@@ -1,22 +1,16 @@
-const LONG_TRIP_THRESHOLD_KM = 150.0;
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-const isWeekend = (date) => {
-  const day = date.getDay();
-  return day === 0 || day === 6;
-};
-
-const haversineKm = (lat1, lng1, lat2, lng2) => {
-  const radiusKm = 6371.0;
-  const phi1 = (lat1 * Math.PI) / 180;
-  const phi2 = (lat2 * Math.PI) / 180;
-  const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
-  const deltaLambda = ((lng2 - lng1) * Math.PI) / 180;
-
-  const a =
-    Math.sin(deltaPhi / 2) ** 2 +
-    Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return radiusKm * c;
+const durationMinutesForType = (trainingType) => {
+  if (!trainingType) {
+    return 240;
+  }
+  if (Number.isInteger(trainingType.durationMinutes) && trainingType.durationMinutes > 0) {
+    return trainingType.durationMinutes;
+  }
+  if (typeof trainingType.teachingHours === "number" && trainingType.teachingHours > 0) {
+    return Math.round(trainingType.teachingHours * 60);
+  }
+  return 240;
 };
 
 const parseRuleValue = (ruleValue) => {
@@ -33,189 +27,216 @@ const parseRuleValue = (ruleValue) => {
   }
 };
 
-const ruleValue = (trainer, ruleType) => {
-  const rules = trainer.rules || [];
-  for (const rule of rules) {
-    if (rule.ruleType === ruleType) {
-      return parseRuleValue(rule.ruleValue);
+const countDistinctDates = (datetimes = []) => {
+  const days = new Set();
+  datetimes.forEach((value) => {
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+      return;
     }
-  }
-  return null;
+    days.add(value.toISOString().slice(0, 10));
+  });
+  return days.size;
 };
 
-const hasConflict = (training, existing) => {
-  for (const other of existing) {
-    if (other.id === training.id) {
-      continue;
-    }
-    if (training.startDatetime < other.endDatetime && training.endDatetime > other.startDatetime) {
-      return true;
-    }
-  }
-  return false;
+const monthRangeForDate = (value) => {
+  const date = value instanceof Date ? value : new Date();
+  const start = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+  return { start, end };
 };
 
-const trainingsInMonth = (training, existing) => {
-  return existing.filter(
-    (item) =>
-      item.startDatetime.getFullYear() === training.startDatetime.getFullYear() &&
-      item.startDatetime.getMonth() === training.startDatetime.getMonth()
-  );
-};
-
-const trainingHours = (training) => {
-  const durationMs = training.endDatetime - training.startDatetime;
-  return Math.max(0, durationMs / 3600000);
-};
-
-const estimatedCost = (trainer, distanceKm, training) => {
-  const hourlyRate = trainer.hourlyRate ?? null;
-  const travelRate = trainer.travelRateKm ?? null;
-  if (hourlyRate === null && travelRate === null) {
-    return null;
-  }
-  let total = 0;
-  if (hourlyRate !== null) {
-    total += hourlyRate * trainingHours(training);
-  }
-  if (travelRate !== null) {
-    total += travelRate * distanceKm;
-  }
-  return total;
-};
-
-const longTripCount = (trainer, training, existing, thresholdKm) => {
-  if (trainer.homeLat === null || trainer.homeLng === null) {
+const toShare = (part, total) => {
+  if (!total) {
     return 0;
   }
-  let trips = 0;
-  for (const item of trainingsInMonth(training, existing)) {
-    if (item.lat === null || item.lng === null) {
-      continue;
-    }
-    const distance = haversineKm(item.lat, item.lng, trainer.homeLat, trainer.homeLng);
-    if (distance > thresholdKm) {
-      trips += 1;
-    }
-  }
-  return trips;
+  return part / total;
 };
 
-const recommendTrainers = (training, trainers, existingTrainings) => {
-  if (training.lat === null || training.lng === null) {
-    return { matches: [], usedCompromise: false };
-  }
+const computeFairness = ({
+  trainerId,
+  slotStart,
+  offeredDatesByTrainer,
+  deliveredDatesByTrainer,
+  eligibleTrainerIds,
+}) => {
+  const month = monthRangeForDate(slotStart);
+  const eligible = Array.from(new Set(eligibleTrainerIds));
 
-  const trainingsByTrainer = {};
-  for (const existing of existingTrainings) {
-    if (!existing.assignedTrainerId) {
-      continue;
-    }
-    if (!trainingsByTrainer[existing.assignedTrainerId]) {
-      trainingsByTrainer[existing.assignedTrainerId] = [];
-    }
-    trainingsByTrainer[existing.assignedTrainerId].push(existing);
-  }
+  const offeredByTrainer = {};
+  const deliveredByTrainer = {};
 
-  const matches = [];
-  const compromises = [];
-
-  for (const trainer of trainers) {
-    if (trainer.homeLat === null || trainer.homeLng === null) {
-      continue;
-    }
-    const distance = haversineKm(
-      training.lat,
-      training.lng,
-      trainer.homeLat,
-      trainer.homeLng
+  eligible.forEach((id) => {
+    const offered = (offeredDatesByTrainer[id] || []).filter(
+      (date) => date >= month.start && date <= month.end
     );
-    const ruleFailures = [];
-    const softWarnings = [];
+    const delivered = (deliveredDatesByTrainer[id] || []).filter(
+      (date) => date >= month.start && date <= month.end
+    );
+    offeredByTrainer[id] = countDistinctDates(offered);
+    deliveredByTrainer[id] = countDistinctDates(delivered);
+  });
 
-    const skillIds = new Set((trainer.skills || []).map((skill) => skill.trainingTypeId));
-    if (!skillIds.has(training.trainingTypeId)) {
-      ruleFailures.push("Neučí tento typ školení");
-    }
+  const totalOffered = Object.values(offeredByTrainer).reduce((sum, value) => sum + value, 0);
+  const totalDelivered = Object.values(deliveredByTrainer).reduce((sum, value) => sum + value, 0);
 
-    const maxDistance = ruleValue(trainer, "max_distance_km");
-    if (maxDistance && distance > maxDistance) {
-      ruleFailures.push(`Překročena max. vzdálenost (${maxDistance} km)`);
-    }
+  const offeredDays = offeredByTrainer[trainerId] || 0;
+  const deliveredDays = deliveredByTrainer[trainerId] || 0;
+  const targetShare = toShare(offeredDays, totalOffered);
+  const actualShare = toShare(deliveredDays, totalDelivered);
 
-    const weekendAllowed = ruleValue(trainer, "weekend_allowed");
-    if (weekendAllowed === false && isWeekend(training.startDatetime)) {
-      ruleFailures.push("Víkendy nepovoleny");
-    }
+  const gap = actualShare - targetShare;
+  const toleranceRatio = 0.2;
+  const deviationRatio = targetShare > 0 ? Math.abs(gap) / targetShare : actualShare > 0 ? 1 : 0;
+  const withinTolerance = deviationRatio <= toleranceRatio;
 
-    const assignedTrainings = trainingsByTrainer[trainer.id] || [];
-    if (hasConflict(training, assignedTrainings)) {
-      ruleFailures.push("Časová kolize");
-    }
-
-    const maxLongTrips = ruleValue(trainer, "max_long_trips_per_month");
-    const longTrips = longTripCount(trainer, training, assignedTrainings, LONG_TRIP_THRESHOLD_KM);
-    if (maxLongTrips !== null && distance > LONG_TRIP_THRESHOLD_KM) {
-      if (longTrips >= maxLongTrips) {
-        ruleFailures.push("Dosažen limit dlouhých cest");
-      }
-    }
-
-    const monthlyWorkload = trainingsInMonth(training, assignedTrainings).length;
-    const totalWorkload = monthlyWorkload + longTrips;
-    const estCost = estimatedCost(trainer, distance, training);
-
-    let score = Math.max(0, 800.0 - distance * 4.0);
-    score += Math.max(0, 20 - monthlyWorkload) * 6.0;
-    if (estCost !== null) {
-      score += Math.max(0, 4000.0 - estCost) * 0.04;
-    }
-    score -= longTrips * 3.0;
-
-    const preferredWeekdays = ruleValue(trainer, "preferred_weekdays") || [];
-    if (preferredWeekdays.length) {
-      const weekday = (training.startDatetime.getDay() + 6) % 7;
-      if (!preferredWeekdays.includes(weekday)) {
-        score -= 15.0;
-        softWarnings.push("Mimo preferované dny");
-      }
-    }
-
-    const reasons = [
-      `Vzdálenost ${distance.toFixed(1)} km`,
-      `Vytížení ${totalWorkload} (školení ${monthlyWorkload}, dlouhé cesty ${longTrips})`,
-    ];
-    if (estCost !== null) {
-      reasons.push(`Odhadované náklady ${Math.round(estCost)} Kč`);
-    }
-
-    const match = {
-      trainer,
-      score,
-      estimatedCost: estCost,
-      reasons,
-      warnings: [...ruleFailures, ...softWarnings],
-    };
-
-    if (!ruleFailures.length) {
-      matches.push(match);
-    } else if (ruleFailures.length === 1) {
-      compromises.push(match);
-    }
-  }
-
-  const sortedMatches = matches.sort((a, b) => b.score - a.score);
-  if (sortedMatches.length) {
-    return { matches: sortedMatches, usedCompromise: false };
-  }
   return {
-    matches: compromises.sort((a, b) => b.score - a.score),
-    usedCompromise: true,
+    offeredDays,
+    deliveredDays,
+    targetShare,
+    actualShare,
+    gap,
+    deviationRatio,
+    withinTolerance,
   };
 };
 
+const scoreCandidate = ({ fairness, slotStart, windowStart, windowEnd }) => {
+  const windowDuration = Math.max(1, windowEnd.getTime() - windowStart.getTime());
+  const slotProgress = clamp((slotStart.getTime() - windowStart.getTime()) / windowDuration, 0, 1);
+  const slotFitScore = 100 * (1 - slotProgress);
+
+  const fairnessDeficit = fairness.targetShare - fairness.actualShare;
+  const fairnessScore = clamp(50 + fairnessDeficit * 220, 0, 100);
+
+  return clamp(0.75 * fairnessScore + 0.25 * slotFitScore, 0, 100);
+};
+
+const buildFairnessReason = (fairness) => {
+  const targetPercent = Math.round(fairness.targetShare * 1000) / 10;
+  const actualPercent = Math.round(fairness.actualShare * 1000) / 10;
+  const delta = Math.round((fairness.targetShare - fairness.actualShare) * 1000) / 10;
+  if (delta > 0) {
+    return `Pod cílovým podílem o ${delta} p. b. (cíl ${targetPercent} %, skutečnost ${actualPercent} %).`;
+  }
+  if (delta < 0) {
+    return `Nad cílovým podílem o ${Math.abs(delta)} p. b. (cíl ${targetPercent} %, skutečnost ${actualPercent} %).`;
+  }
+  return `Na cílovém podílu ${targetPercent} %.`;
+};
+
+const recommendTrainerSlots = ({
+  training,
+  trainers,
+  slots,
+  deliveredDatesByTrainer,
+}) => {
+  if (!training || !training.trainingType) {
+    return [];
+  }
+
+  const windowStart = training.requestWindowStart || training.startDatetime;
+  const windowEnd = training.requestWindowEnd || training.endDatetime;
+  if (!(windowStart instanceof Date) || !(windowEnd instanceof Date)) {
+    return [];
+  }
+
+  const requiredMinutes = durationMinutesForType(training.trainingType);
+  const requiredMs = requiredMinutes * 60000;
+
+  const eligibleTrainerIds = [];
+  const trainerById = {};
+
+  trainers.forEach((trainer) => {
+    trainerById[trainer.id] = trainer;
+    const skillIds = new Set((trainer.skills || []).map((skill) => skill.trainingTypeId));
+    if (skillIds.has(training.trainingTypeId)) {
+      eligibleTrainerIds.push(trainer.id);
+    }
+  });
+
+  const offeredDatesByTrainer = {};
+  slots.forEach((slot) => {
+    if (!slot.isActive) {
+      return;
+    }
+    if (!offeredDatesByTrainer[slot.trainerId]) {
+      offeredDatesByTrainer[slot.trainerId] = [];
+    }
+    offeredDatesByTrainer[slot.trainerId].push(slot.startDatetime);
+  });
+
+  const matches = [];
+  const seenTrainerSlot = new Set();
+
+  slots.forEach((slot) => {
+    const trainer = trainerById[slot.trainerId];
+    if (!trainer) {
+      return;
+    }
+
+    const skillIds = new Set((trainer.skills || []).map((skill) => skill.trainingTypeId));
+    if (!skillIds.has(training.trainingTypeId)) {
+      return;
+    }
+    if (!slot.isActive || slot.assignedTrainingId) {
+      return;
+    }
+
+    const durationMs = slot.endDatetime.getTime() - slot.startDatetime.getTime();
+    if (durationMs < requiredMs) {
+      return;
+    }
+    if (slot.startDatetime < windowStart || slot.endDatetime > windowEnd) {
+      return;
+    }
+
+    const signature = `${trainer.id}-${slot.id}`;
+    if (seenTrainerSlot.has(signature)) {
+      return;
+    }
+    seenTrainerSlot.add(signature);
+
+    const fairness = computeFairness({
+      trainerId: trainer.id,
+      slotStart: slot.startDatetime,
+      offeredDatesByTrainer,
+      deliveredDatesByTrainer,
+      eligibleTrainerIds,
+    });
+    const matchPercent = scoreCandidate({
+      fairness,
+      slotStart: slot.startDatetime,
+      windowStart,
+      windowEnd,
+    });
+    const reasons = [
+      "Trenér má dovednost pro zvolené téma.",
+      "Slot splňuje požadovanou délku i časové okno.",
+      buildFairnessReason(fairness),
+    ];
+
+    matches.push({
+      trainer,
+      slot,
+      matchPercent,
+      reasons,
+      fairness,
+    });
+  });
+
+  matches.sort((a, b) => {
+    if (b.matchPercent !== a.matchPercent) {
+      return b.matchPercent - a.matchPercent;
+    }
+    return a.slot.startDatetime.getTime() - b.slot.startDatetime.getTime();
+  });
+
+  return matches.slice(0, 50);
+};
+
 module.exports = {
-  LONG_TRIP_THRESHOLD_KM,
-  haversineKm,
-  recommendTrainers,
+  durationMinutesForType,
+  monthRangeForDate,
+  parseRuleValue,
+  recommendTrainerSlots,
 };

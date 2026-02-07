@@ -1,16 +1,9 @@
 const TRAINING_STATUS_LABELS = {
   draft: "Koncept",
-  waiting: "Čeká na trenéra",
+  open: "Otevřené",
   assigned: "Přiřazeno",
   confirmed: "Potvrzeno",
   canceled: "Zrušeno",
-};
-
-const TRAINER_RULE_LABELS = {
-  max_distance_km: "Maximální vzdálenost (km)",
-  weekend_allowed: "Víkendy povoleny",
-  max_long_trips_per_month: "Maximální počet dlouhých cest za měsíc",
-  preferred_weekdays: "Preferované dny v týdnu",
 };
 
 const statusChoices = () =>
@@ -18,23 +11,13 @@ const statusChoices = () =>
 
 const statusLabel = (value) => TRAINING_STATUS_LABELS[value] || value || "";
 
-const parseRuleValue = (ruleValue) => {
-  if (!ruleValue) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(ruleValue);
-    return parsed && Object.prototype.hasOwnProperty.call(parsed, "value")
-      ? parsed.value
-      : null;
-  } catch (err) {
-    return null;
-  }
-};
+const isoOrNull = (value) =>
+  value instanceof Date && !Number.isNaN(value.getTime()) ? value.toISOString() : null;
 
 const trainingTypePayload = (trainingType) => ({
   id: trainingType.id,
   name: trainingType.name,
+  duration_minutes: trainingType.durationMinutes ?? 240,
   teaching_hours: trainingType.teachingHours ?? null,
   max_participants: trainingType.maxParticipants ?? null,
 });
@@ -60,11 +43,18 @@ const trainerSummary = (trainer) => ({
   display_name: trainerDisplayName(trainer),
 });
 
+const availabilitySlotPayload = (slot) => ({
+  id: slot.id,
+  start_datetime: isoOrNull(slot.startDatetime),
+  end_datetime: isoOrNull(slot.endDatetime),
+  is_active: slot.isActive,
+  assigned_training_id: slot.assignedTrainingId ?? null,
+});
+
 const trainerPayload = (trainer, detail = false) => {
-  const fullName = trainerFullName(trainer);
   const payload = {
     id: trainer.id,
-    name: fullName,
+    name: trainerFullName(trainer),
     first_name: trainer.firstName || "",
     last_name: trainer.lastName || "",
     title_prefix: trainer.titlePrefix || "",
@@ -83,70 +73,67 @@ const trainerPayload = (trainer, detail = false) => {
     hourly_rate: trainer.hourlyRate,
     travel_rate_km: trainer.travelRateKm,
     notes: trainer.notes || "",
+    created_at: isoOrNull(trainer.createdAt),
+    updated_at: isoOrNull(trainer.updatedAt),
   };
+
   if (detail) {
     payload.training_types = (trainer.skills || []).map((skill) =>
       trainingTypePayload(skill.trainingType)
     );
-    payload.rules = (trainer.rules || []).map((rule) => ({
-      type: rule.ruleType,
-      label: TRAINER_RULE_LABELS[rule.ruleType] || rule.ruleType,
-      value: parseRuleValue(rule.ruleValue),
-    }));
+    payload.availability_slots = (trainer.availabilitySlots || [])
+      .slice()
+      .sort((a, b) => a.startDatetime.getTime() - b.startDatetime.getTime())
+      .map(availabilitySlotPayload);
   }
+
   return payload;
 };
 
-const trainingListItem = (training) => {
-  const assignedTrainer = training.assignedTrainer
-    ? trainerSummary(training.assignedTrainer)
-    : null;
-  return {
-    id: training.id,
-    training_type: trainingTypePayload(training.trainingType),
-    customer_name: training.customerName || "",
-    address: training.address,
-    start_datetime: training.startDatetime.toISOString(),
-    end_datetime: training.endDatetime.toISOString(),
-    status: training.status,
-    status_label: statusLabel(training.status),
-    assigned_trainer: assignedTrainer,
-  };
-};
+const trainingListItem = (training) => ({
+  id: training.id,
+  training_type: trainingTypePayload(training.trainingType),
+  customer_name: training.customerName || "",
+  address: training.address,
+  request_window_start: isoOrNull(training.requestWindowStart || training.startDatetime),
+  request_window_end: isoOrNull(training.requestWindowEnd || training.endDatetime),
+  assigned_start_datetime: training.assignedTrainerId ? isoOrNull(training.startDatetime) : null,
+  assigned_end_datetime: training.assignedTrainerId ? isoOrNull(training.endDatetime) : null,
+  status: training.status,
+  status_label: statusLabel(training.status),
+  assigned_trainer: training.assignedTrainer ? trainerSummary(training.assignedTrainer) : null,
+  created_at: isoOrNull(training.createdAt),
+  updated_at: isoOrNull(training.updatedAt),
+});
 
-const trainingPayload = (training) => {
+const trainingPayload = (training, assignedSlot = null) => {
   const payload = trainingListItem(training);
   payload.lat = training.lat;
   payload.lng = training.lng;
   payload.assignment_reason = training.assignmentReason || "";
   payload.notes = training.notes || "";
-  payload.google_event_id = training.googleEventId || "";
-  payload.visitors = training.visitors ?? null;
-  payload.accreditation = training.accreditation ?? null;
-  payload.hours = training.hours ?? null;
-  payload.trainers_fee = training.trainersFee ?? null;
-  payload.price_w_vat = training.priceWithVat ?? null;
-  payload.payer_address = training.payerAddress || "";
-  payload.payer_id = training.payerId || "";
-  payload.invoice_number = training.invoiceNumber || "";
-  payload.training_place = training.trainingPlace || "";
-  payload.contact_name = training.contactName || "";
-  payload.contact_phone = training.contactPhone || "";
-  payload.invoice_email = training.invoiceEmail || "";
-  payload.email_for_approval = training.approvalEmail || "";
-  payload.study_materials = training.studyMaterials || "";
-  payload.info_for_the_trainer = training.infoForTheTrainer || "";
-  payload.pp = training.pp || "";
-  payload.d = training.d || "";
+  payload.changed_by = training.changedBy || "";
+  payload.assigned_slot = assignedSlot ? availabilitySlotPayload(assignedSlot) : null;
   return payload;
 };
 
+const fairnessPayload = (fairness) => ({
+  offered_days: fairness.offeredDays,
+  delivered_days: fairness.deliveredDays,
+  target_share: fairness.targetShare,
+  actual_share: fairness.actualShare,
+  deviation_ratio: fairness.deviationRatio,
+  within_tolerance: fairness.withinTolerance,
+});
+
 module.exports = {
+  availabilitySlotPayload,
+  fairnessPayload,
   statusChoices,
   statusLabel,
+  trainerPayload,
+  trainerSummary,
   trainingListItem,
   trainingPayload,
   trainingTypePayload,
-  trainerPayload,
-  trainerSummary,
 };

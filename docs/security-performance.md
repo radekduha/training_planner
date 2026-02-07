@@ -1,18 +1,19 @@
 # Security and performance
 
 ## Security
-- Require login even for a single user.
+- Require login for internal planners.
 - Use secure session cookies and CSRF protection.
 - Validate and sanitize all user input.
 - Store secrets in environment variables, never in git.
-- Backups enabled at the database level.
+- Enable backups at the database level.
 
 ## Performance
-- Index training dates and status for fast lists.
-- Cache geocoding results to avoid slow repeats.
-- Keep response payloads small; use pagination.
-- Avoid heavy JS and large client bundles.
+- Index request windows, slot times, and assignment relations for fast matching.
+- Keep matching payloads compact and paginated when needed.
+- Target low-latency assignment commits and realtime updates for small team usage.
+- Avoid unnecessary client bundle growth.
 
 ## Reliability
-- Log errors with request context.
-- Add basic health checks for uptime monitoring.
+- Log matching and assignment errors with request context.
+- Add health checks for API and realtime channel.
+- Use transactional writes on assignment to prevent double booking.

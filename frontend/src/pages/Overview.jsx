@@ -1,77 +1,103 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { fetchTrainings } from "../api/trainings.js";
 import { fetchTrainers } from "../api/trainers.js";
 import { fetchTrainingTypes } from "../api/trainingTypes.js";
 import PageHeader from "../components/PageHeader.jsx";
+import useRealtimeInvalidate from "../hooks/useRealtimeInvalidate.js";
 
 const formatDate = (date) => date.toISOString().slice(0, 10);
 
-const sortByStart = (items = []) =>
-  [...items].sort((a, b) => new Date(a.start_datetime) - new Date(b.start_datetime));
+const formatDateTime = (value) => {
+  if (!value) {
+    return "--";
+  }
+  return new Date(value).toLocaleString("cs-CZ", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
 
 const Overview = () => {
   const [stats, setStats] = useState({
-    today: 0,
-    week: 0,
-    unassigned: 0,
+    open: 0,
+    assigned: 0,
+    confirmed: 0,
     trainers: 0,
-    types: 0,
+    topics: 0,
   });
-  const [lists, setLists] = useState({ upcoming: [], needsTrainer: [] });
-  const [range, setRange] = useState({ today: "", week: "" });
+  const [lists, setLists] = useState({ upcoming: [], needsAssignment: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    const today = new Date();
-    const weekEnd = new Date(today);
-    weekEnd.setDate(today.getDate() + 6);
-    const todayStr = formatDate(today);
-    const weekEndStr = formatDate(weekEnd);
+  const loadOverview = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const today = new Date();
+      const next30 = new Date(today);
+      next30.setDate(today.getDate() + 30);
 
-    setRange({
-      today: today.toLocaleDateString(),
-      week: `${today.toLocaleDateString()} - ${weekEnd.toLocaleDateString()}`,
-    });
+      const [openData, assignedData, confirmedData, trainersData, typesData] = await Promise.all([
+        fetchTrainings({ status: "open", limit: 100 }),
+        fetchTrainings({ status: "assigned", limit: 100 }),
+        fetchTrainings({ status: "confirmed", limit: 100 }),
+        fetchTrainers({ limit: 1 }),
+        fetchTrainingTypes(),
+      ]);
 
-    const loadOverview = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [todayData, weekData, unassignedData, trainersData, typesData] =
-          await Promise.all([
-            fetchTrainings({ start_date: todayStr, end_date: todayStr }),
-            fetchTrainings({ start_date: todayStr, end_date: weekEndStr }),
-            fetchTrainings({ no_trainer: "1" }),
-            fetchTrainers(),
-            fetchTrainingTypes(),
-          ]);
+      const upcoming = [...(assignedData.items || []), ...(confirmedData.items || [])]
+        .filter((item) => {
+          const start = item.assigned_start_datetime;
+          if (!start) {
+            return false;
+          }
+          const date = new Date(start);
+          return date >= today && date <= next30;
+        })
+        .sort(
+          (a, b) =>
+            new Date(a.assigned_start_datetime).getTime() -
+            new Date(b.assigned_start_datetime).getTime()
+        )
+        .slice(0, 5);
 
-        const upcoming = sortByStart(weekData.items || []);
-        const needsTrainer = sortByStart(unassignedData.items || []);
+      const needsAssignment = (openData.items || [])
+        .sort(
+          (a, b) =>
+            new Date(a.request_window_start || 0).getTime() -
+            new Date(b.request_window_start || 0).getTime()
+        )
+        .slice(0, 5);
 
-        setStats({
-          today: todayData.items?.length || 0,
-          week: weekData.items?.length || 0,
-          unassigned: unassignedData.items?.length || 0,
-          trainers: trainersData.items?.length || 0,
-          types: typesData.items?.length || 0,
-        });
-        setLists({
-          upcoming: upcoming.slice(0, 5),
-          needsTrainer: needsTrainer.slice(0, 5),
-        });
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadOverview();
+      setStats({
+        open: openData.total_count ?? openData.items?.length ?? 0,
+        assigned: assignedData.total_count ?? assignedData.items?.length ?? 0,
+        confirmed: confirmedData.total_count ?? confirmedData.items?.length ?? 0,
+        trainers: trainersData.total_count ?? trainersData.items?.length ?? 0,
+        topics: typesData.items?.length || 0,
+      });
+      setLists({ upcoming, needsAssignment });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadOverview();
+  }, [loadOverview]);
+
+  useRealtimeInvalidate(
+    useCallback(() => {
+      loadOverview();
+    }, [loadOverview])
+  );
 
   const showPlaceholder = loading || error;
 
@@ -79,28 +105,29 @@ const Overview = () => {
     <section className="stack">
       <PageHeader
         title="Přehled"
-        subtitle="Nejdůležitější signály z vašeho procesu školení."
+        subtitle="Stav poptávek, kapacity a přiřazení v availability-first režimu."
         actions={
           <Link className="btn btn-ghost" to="/trainings">
-            Zobrazit školení
+            Otevřít poptávky
           </Link>
         }
       />
+
       <div className="overview-stats">
         <div className="card stat-card">
-          <div className="stat-label">Dnes</div>
-          <div className="stat-value">{showPlaceholder ? "--" : stats.today}</div>
-          <div className="stat-meta">{range.today || "Dnes"}</div>
+          <div className="stat-label">Open</div>
+          <div className="stat-value">{showPlaceholder ? "--" : stats.open}</div>
+          <div className="stat-meta">Čeká na přiřazení slotu</div>
         </div>
         <div className="card stat-card">
-          <div className="stat-label">Příštích 7 dní</div>
-          <div className="stat-value">{showPlaceholder ? "--" : stats.week}</div>
-          <div className="stat-meta">{range.week || "Tento týden"}</div>
+          <div className="stat-label">Assigned</div>
+          <div className="stat-value">{showPlaceholder ? "--" : stats.assigned}</div>
+          <div className="stat-meta">Slot přiřazen interně</div>
         </div>
         <div className="card stat-card">
-          <div className="stat-label">Chybí trenér</div>
-          <div className="stat-value">{showPlaceholder ? "--" : stats.unassigned}</div>
-          <div className="stat-meta">Koncept + čeká</div>
+          <div className="stat-label">Confirmed</div>
+          <div className="stat-value">{showPlaceholder ? "--" : stats.confirmed}</div>
+          <div className="stat-meta">Potvrzené realizace</div>
         </div>
         <div className="card stat-card">
           <div className="stat-label">Trenéři</div>
@@ -108,100 +135,88 @@ const Overview = () => {
           <div className="stat-meta">Aktivní profily</div>
         </div>
         <div className="card stat-card">
-          <div className="stat-label">Typy školení</div>
-          <div className="stat-value">{showPlaceholder ? "--" : stats.types}</div>
-          <div className="stat-meta">Kategorie</div>
+          <div className="stat-label">Témata</div>
+          <div className="stat-value">{showPlaceholder ? "--" : stats.topics}</div>
+          <div className="stat-meta">Katalog témat</div>
         </div>
       </div>
+
       <div className="grid two">
         <div className="card">
-          <h2>Nadcházející školení</h2>
+          <h2>Nadcházející přiřazené sloty (30 dní)</h2>
           {loading ? (
             <p className="muted">Načítání přehledu...</p>
           ) : error ? (
             <p className="error">{error}</p>
           ) : lists.upcoming.length ? (
-            <>
-              <ul className="overview-list">
-                {lists.upcoming.map((training) => (
-                  <li key={training.id} className="overview-item">
-                    <div>
-                      <div className="overview-item-title">
-                        {training.training_type?.name || "Školení"}
-                      </div>
-                      <div className="muted">
-                        {new Date(training.start_datetime).toLocaleString()} -{" "}
-                        {training.customer_name || "Neznámý zákazník"}
-                      </div>
+            <ul className="overview-list">
+              {lists.upcoming.map((training) => (
+                <li key={training.id} className="overview-item">
+                  <div>
+                    <div className="overview-item-title">
+                      {training.training_type?.name || `Poptávka #${training.id}`}
                     </div>
-                    <div className="overview-item-meta">
-                      <span className="pill">{training.status_label}</span>
-                      <Link className="text-link" to={`/trainings/${training.id}`}>
-                        Detail
-                      </Link>
+                    <div className="muted">
+                      {formatDateTime(training.assigned_start_datetime)} / {training.customer_name || "--"}
                     </div>
-                  </li>
-                ))}
-              </ul>
-              {stats.week > lists.upcoming.length ? (
-                <Link className="text-link" to="/trainings">
-                  Zobrazit všechna nadcházející školení
-                </Link>
-              ) : null}
-            </>
+                  </div>
+                  <div className="overview-item-meta">
+                    <span className="pill">{training.status_label}</span>
+                    <Link className="text-link" to={`/trainings/${training.id}`}>
+                      Detail
+                    </Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
           ) : (
-            <p className="muted">V příštích 7 dnech nejsou žádná školení.</p>
+            <p className="muted">V následujících 30 dnech nejsou přiřazené sloty.</p>
           )}
         </div>
+
         <div className="card">
-          <h2>Chybí trenér</h2>
+          <h2>Čeká na přiřazení</h2>
           {loading ? (
             <p className="muted">Načítání přehledu...</p>
           ) : error ? (
             <p className="error">{error}</p>
-          ) : lists.needsTrainer.length ? (
-            <>
-              <ul className="overview-list">
-                {lists.needsTrainer.map((training) => (
-                  <li key={training.id} className="overview-item">
-                    <div>
-                      <div className="overview-item-title">
-                        {training.training_type?.name || "Školení"}
-                      </div>
-                      <div className="muted">
-                        {new Date(training.start_datetime).toLocaleString()} -{" "}
-                        {training.address || "Chybí adresa"}
-                      </div>
+          ) : lists.needsAssignment.length ? (
+            <ul className="overview-list">
+              {lists.needsAssignment.map((training) => (
+                <li key={training.id} className="overview-item">
+                  <div>
+                    <div className="overview-item-title">
+                      {training.training_type?.name || `Poptávka #${training.id}`}
                     </div>
-                    <div className="overview-item-meta">
-                      <span className="pill">{training.status_label}</span>
-                      <Link className="text-link" to={`/trainings/${training.id}`}>
-                        Přiřadit
-                      </Link>
+                    <div className="muted">
+                      {formatDateTime(training.request_window_start)}
+                      {" -> "}
+                      {formatDateTime(training.request_window_end)}
                     </div>
-                  </li>
-                ))}
-              </ul>
-              {stats.unassigned > lists.needsTrainer.length ? (
-                <Link className="text-link" to="/trainings">
-                  Zkontrolovat nepřiřazená školení
-                </Link>
-              ) : null}
-            </>
+                  </div>
+                  <div className="overview-item-meta">
+                    <span className="pill">{training.status_label}</span>
+                    <Link className="text-link" to={`/trainings/${training.id}`}>
+                      Přiřadit
+                    </Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
           ) : (
-            <p className="muted">Vše je přiřazeno. Skvělá práce.</p>
+            <p className="muted">Žádná otevřená poptávka.</p>
           )}
         </div>
       </div>
+
       <div className="card">
         <h2>Rychlé akce</h2>
-        <p className="muted">Udržujte tempo několika kliknutími.</p>
         <div className="overview-actions">
           <Link className="btn" to="/trainings/new">
-            Vytvořit školení
+            Nová poptávka
           </Link>
           <Link className="btn btn-ghost" to="/trainers/new">
-            Vytvořit trenéra
+            Nový trenér
           </Link>
           <Link className="btn btn-ghost" to="/calendar">
             Otevřít kalendář

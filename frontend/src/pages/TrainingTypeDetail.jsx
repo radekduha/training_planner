@@ -12,12 +12,9 @@ const formatValue = (value, fallback = "--") => {
   return value;
 };
 
-const formatFieldValue = (value) => (value === null || value === undefined ? "" : String(value));
-
 const getErrorMessage = (err) =>
   err?.payload?.errors?.name?.[0]?.message ||
-  err?.payload?.errors?.teaching_hours?.[0]?.message ||
-  err?.payload?.errors?.max_participants?.[0]?.message ||
+  err?.payload?.errors?.duration_minutes?.[0]?.message ||
   err?.payload?.error ||
   err?.message ||
   "Něco se pokazilo.";
@@ -28,7 +25,7 @@ const TrainingTypeDetail = () => {
   const [trainers, setTrainers] = useState([]);
   const [form, setForm] = useState({
     name: "",
-    teaching_hours: "",
+    duration_minutes: "240",
     max_participants: "",
   });
   const [loading, setLoading] = useState(true);
@@ -45,20 +42,16 @@ const TrainingTypeDetail = () => {
         setTrainers(data.trainers || []);
         setForm({
           name: data.item?.name || "",
-          teaching_hours: formatFieldValue(data.item?.teaching_hours),
-          max_participants: formatFieldValue(data.item?.max_participants),
+          duration_minutes: String(data.item?.duration_minutes || 240),
+          max_participants:
+            data.item?.max_participants === null || data.item?.max_participants === undefined
+              ? ""
+              : String(data.item?.max_participants),
         });
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [id]);
-
-  const handleChange = (field) => (event) => {
-    setForm((prev) => ({ ...prev, [field]: event.target.value }));
-    if (formError) {
-      setFormError(null);
-    }
-  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -67,12 +60,13 @@ const TrainingTypeDetail = () => {
       setFormError("Název je povinný.");
       return;
     }
+
     setSaving(true);
     setFormError(null);
     try {
       const payload = {
         name: trimmedName,
-        teaching_hours: form.teaching_hours,
+        duration_minutes: Number(form.duration_minutes || 240),
         max_participants: form.max_participants,
       };
       const data = await updateTrainingType(id, payload);
@@ -80,8 +74,7 @@ const TrainingTypeDetail = () => {
       setForm((prev) => ({
         ...prev,
         name: data.item?.name || "",
-        teaching_hours: formatFieldValue(data.item?.teaching_hours),
-        max_participants: formatFieldValue(data.item?.max_participants),
+        duration_minutes: String(data.item?.duration_minutes || 240),
       }));
     } catch (err) {
       setFormError(getErrorMessage(err));
@@ -93,7 +86,7 @@ const TrainingTypeDetail = () => {
   if (loading) {
     return (
       <section className="stack">
-        <p className="muted">Načítání typu školení...</p>
+        <p className="muted">Načítání tématu...</p>
       </section>
     );
   }
@@ -102,10 +95,10 @@ const TrainingTypeDetail = () => {
     return (
       <section className="stack">
         <div className="card">
-          <h2>Detail typu školení</h2>
+          <h2>Detail tématu</h2>
           <p className="error">{error}</p>
           <Link className="btn" to="/training-types">
-            Zpět na typy školení
+            Zpět na témata
           </Link>
         </div>
       </section>
@@ -120,7 +113,7 @@ const TrainingTypeDetail = () => {
     <section className="stack">
       <PageHeader
         title={trainingType.name}
-        subtitle="Parametry typu školení a přehled lektorů."
+        subtitle="Fixní délka tématu a seznam trenérů se skill match."
         actions={
           <Link className="btn btn-ghost" to="/training-types">
             Zpět na seznam
@@ -129,28 +122,37 @@ const TrainingTypeDetail = () => {
       />
       <div className="grid two">
         <div className="card">
-          <h3>Informace o kurzu</h3>
+          <h3>Parametry tématu</h3>
           <div className="detail-list two-column">
             <div className="detail-item">
-              <span>Vyučující hodiny</span>
-              <strong>{formatValue(trainingType.teaching_hours)}</strong>
+              <span>Délka (min)</span>
+              <strong>{formatValue(trainingType.duration_minutes, 240)}</strong>
             </div>
             <div className="detail-divider" role="presentation" />
             <div className="detail-item">
-              <span>Maximální počet účastníků</span>
+              <span>Max. účastníků</span>
               <strong>{formatValue(trainingType.max_participants)}</strong>
             </div>
           </div>
+
           <form onSubmit={handleSubmit} className="stack">
             <FormField label="Název" htmlFor="name">
-              <input id="name" value={form.name} onChange={handleChange("name")} />
-            </FormField>
-            <FormField label="Vyučující hodiny" htmlFor="teaching-hours">
               <input
-                id="teaching-hours"
-                inputMode="decimal"
-                value={form.teaching_hours}
-                onChange={handleChange("teaching_hours")}
+                id="name"
+                value={form.name}
+                onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+              />
+            </FormField>
+            <FormField label="Délka (min)" htmlFor="duration-minutes">
+              <input
+                id="duration-minutes"
+                type="number"
+                min="30"
+                step="30"
+                value={form.duration_minutes}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, duration_minutes: event.target.value }))
+                }
               />
             </FormField>
             <FormField label="Max. počet účastníků" htmlFor="max-participants">
@@ -158,7 +160,9 @@ const TrainingTypeDetail = () => {
                 id="max-participants"
                 inputMode="numeric"
                 value={form.max_participants}
-                onChange={handleChange("max_participants")}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, max_participants: event.target.value }))
+                }
               />
             </FormField>
             {formError ? <p className="error">{formError}</p> : null}
@@ -167,8 +171,9 @@ const TrainingTypeDetail = () => {
             </button>
           </form>
         </div>
+
         <div className="card">
-          <h3>Lektoři</h3>
+          <h3>Trenéři se skill match</h3>
           {trainers.length ? (
             <ul className="list">
               {trainers.map((trainer) => (
@@ -180,7 +185,7 @@ const TrainingTypeDetail = () => {
               ))}
             </ul>
           ) : (
-            <p className="muted">Zatím žádní lektoři přiřazení k tomuto typu.</p>
+            <p className="muted">K tématu zatím není přiřazený žádný trenér.</p>
           )}
         </div>
       </div>

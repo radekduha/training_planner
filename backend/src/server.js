@@ -7,8 +7,13 @@ const cookieParser = require("cookie-parser");
 const config = require("./env");
 const { prisma } = require("./db");
 const { geocodeAddress } = require("./geocoding");
-const { LONG_TRIP_THRESHOLD_KM, haversineKm, recommendTrainers } = require("./matching");
 const {
+  durationMinutesForType,
+  monthRangeForDate,
+  recommendTrainerSlots,
+} = require("./matching");
+const {
+  fairnessPayload,
   statusChoices,
   trainingListItem,
   trainingPayload,
@@ -30,13 +35,20 @@ const {
   toNumber,
 } = require("./utils");
 
-const VALID_STATUSES = new Set([
-  "draft",
-  "waiting",
-  "assigned",
-  "confirmed",
-  "canceled",
-]);
+const VALID_STATUSES = new Set(["draft", "open", "assigned", "confirmed", "canceled"]);
+const DEFAULT_PAGE_LIMIT = 50;
+const MAX_PAGE_LIMIT = 200;
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+const LOGIN_LOCK_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 5;
+const loginAttempts = new Map();
+
+const isStrongSessionSecret = (value) =>
+  typeof value === "string" && value !== "change-me" && value.length >= 24;
+
+if (process.env.NODE_ENV === "production" && !isStrongSessionSecret(config.sessionSecret)) {
+  throw new Error("SESSION_SECRET must be set to a strong value in production.");
+}
 
 const app = express();
 
@@ -56,8 +68,8 @@ app.use(
   })
 );
 
-if (config.sessionSecret === "change-me") {
-  console.warn("SESSION_SECRET is not set. Set it in .env for production.");
+if (!isStrongSessionSecret(config.sessionSecret)) {
+  console.warn("SESSION_SECRET is weak. Set a strong value for production.");
 }
 
 const asyncHandler = (fn) => (req, res, next) =>
@@ -98,6 +110,89 @@ const requireAuth = (req, res, next) => {
   return res.redirect(302, "/login");
 };
 
+const requireAuthSse = (req, res, next) => {
+  if (req.session && req.session.user) {
+    return next();
+  }
+  return res.status(401).end();
+};
+
+const normalizeStatus = (value, fallback = "open") => {
+  const next = (value || "").trim().toLowerCase();
+  if (!next) {
+    return fallback;
+  }
+  if (next === "waiting") {
+    return "open";
+  }
+  return next;
+};
+
+const clampPageLimit = (value) => {
+  const parsed = toInt(value);
+  if (!parsed || parsed < 1) {
+    return DEFAULT_PAGE_LIMIT;
+  }
+  return Math.min(parsed, MAX_PAGE_LIMIT);
+};
+
+const encodeCursor = (id) => Buffer.from(String(id), "utf8").toString("base64url");
+
+const decodeCursor = (cursor) => {
+  if (!cursor) {
+    return null;
+  }
+  try {
+    const decoded = Buffer.from(String(cursor), "base64url").toString("utf8");
+    return toInt(decoded);
+  } catch (err) {
+    return null;
+  }
+};
+
+const ensureNotStale = (existingUpdatedAt, payloadUpdatedAt) => {
+  const parsed = parseDateTime(payloadUpdatedAt);
+  if (!parsed || !(existingUpdatedAt instanceof Date)) {
+    return false;
+  }
+  return parsed.getTime() === existingUpdatedAt.getTime();
+};
+
+const loginAttemptKey = (req, username) => `${req.ip || "unknown"}:${username || "*"}`;
+
+const getLoginAttemptState = (key) => {
+  const now = Date.now();
+  const state = loginAttempts.get(key);
+  if (!state) {
+    return { failures: [], lockedUntil: 0 };
+  }
+  if (state.lockedUntil && state.lockedUntil <= now) {
+    loginAttempts.delete(key);
+    return { failures: [], lockedUntil: 0 };
+  }
+  const failures = (state.failures || []).filter((timestamp) => now - timestamp <= LOGIN_WINDOW_MS);
+  const next = { failures, lockedUntil: state.lockedUntil || 0 };
+  loginAttempts.set(key, next);
+  return next;
+};
+
+const failLoginAttempt = (key) => {
+  const now = Date.now();
+  const state = getLoginAttemptState(key);
+  const failures = [...state.failures, now].filter((timestamp) => now - timestamp <= LOGIN_WINDOW_MS);
+  const shouldLock = failures.length >= LOGIN_MAX_ATTEMPTS;
+  const next = {
+    failures,
+    lockedUntil: shouldLock ? now + LOGIN_LOCK_MS : 0,
+  };
+  loginAttempts.set(key, next);
+  return next;
+};
+
+const clearLoginAttempts = (req, username) => {
+  loginAttempts.delete(loginAttemptKey(req, username));
+};
+
 const parseBoolean = (value) => {
   if (value === true || value === false) {
     return value;
@@ -111,446 +206,369 @@ const parseBoolean = (value) => {
   return null;
 };
 
-const parseTrainingExtras = (payload, errors) => {
-  const visitors = toInt(payload.visitors);
-  if (payload.visitors !== undefined && payload.visitors !== "" && visitors === null) {
-    addError(errors, "visitors", "Enter a valid number of visitors.");
+const parseWindowRange = (payload = {}, errors = {}) => {
+  const now = new Date();
+  const defaultStart = startOfDay(now);
+  const defaultEnd = endOfDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30));
+
+  const rawStart =
+    payload.request_window_start ?? payload.window_start ?? payload.start_datetime ?? null;
+  const rawEnd = payload.request_window_end ?? payload.window_end ?? payload.end_datetime ?? null;
+
+  let windowStart = rawStart ? parseDateTime(rawStart) : null;
+  let windowEnd = rawEnd ? parseDateTime(rawEnd) : null;
+
+  if (rawStart && !windowStart) {
+    addError(errors, "request_window_start", "Enter a valid window start.");
+  }
+  if (rawEnd && !windowEnd) {
+    addError(errors, "request_window_end", "Enter a valid window end.");
   }
 
-  let accreditation = null;
-  if (payload.accreditation !== undefined && payload.accreditation !== "") {
-    accreditation = parseBoolean(payload.accreditation);
-    if (accreditation === null) {
-      addError(errors, "accreditation", "Select a valid value.");
-    }
+  if (!rawStart && !rawEnd) {
+    windowStart = defaultStart;
+    windowEnd = defaultEnd;
+  } else if (windowStart && !windowEnd) {
+    windowEnd = endOfDay(
+      new Date(windowStart.getFullYear(), windowStart.getMonth(), windowStart.getDate() + 30)
+    );
+  } else if (!windowStart && windowEnd) {
+    windowStart = startOfDay(
+      new Date(windowEnd.getFullYear(), windowEnd.getMonth(), windowEnd.getDate() - 30)
+    );
   }
 
-  const hours = toInt(payload.hours);
-  if (payload.hours !== undefined && payload.hours !== "" && hours === null) {
-    addError(errors, "hours", "Enter a valid number of hours.");
+  if (windowStart && windowEnd && windowEnd <= windowStart) {
+    addError(errors, "request_window_end", "Window end must be after window start.");
   }
 
-  const trainersFee = toNumber(payload.trainers_fee);
-  if (
-    payload.trainers_fee !== undefined &&
-    payload.trainers_fee !== "" &&
-    trainersFee === null
-  ) {
-    addError(errors, "trainers_fee", "Enter a valid trainers fee.");
-  }
-
-  const priceWithVat = toNumber(payload.price_w_vat);
-  if (
-    payload.price_w_vat !== undefined &&
-    payload.price_w_vat !== "" &&
-    priceWithVat === null
-  ) {
-    addError(errors, "price_w_vat", "Enter a valid price.");
-  }
-
-  const payerAddress = (payload.payer_address || "").trim() || null;
-  const payerId = (payload.payer_id || "").trim() || null;
-  const invoiceNumber = (payload.invoice_number || "").trim() || null;
-  const trainingPlace = (payload.training_place || "").trim() || null;
-  const contactName = (payload.contact_name || "").trim() || null;
-  const contactPhone = (payload.contact_phone || "").trim() || null;
-
-  const invoiceEmail = (payload.invoice_email || "").trim();
-  if (invoiceEmail && !invoiceEmail.includes("@")) {
-    addError(errors, "invoice_email", "Enter a valid email address.");
-  }
-
-  const approvalEmail = (payload.email_for_approval || "").trim();
-  if (approvalEmail && !approvalEmail.includes("@")) {
-    addError(errors, "email_for_approval", "Enter a valid email address.");
-  }
-
-  const studyMaterials = (payload.study_materials || "").trim() || null;
-  const infoForTheTrainer = (payload.info_for_the_trainer || "").trim() || null;
-  const pp = (payload.pp || "").trim() || null;
-  const dValue = (payload.d || "").trim() || null;
-
-  return {
-    visitors,
-    accreditation,
-    hours,
-    trainersFee,
-    priceWithVat,
-    payerAddress,
-    payerId,
-    invoiceNumber,
-    trainingPlace,
-    contactName,
-    contactPhone,
-    invoiceEmail: invoiceEmail || null,
-    approvalEmail: approvalEmail || null,
-    studyMaterials,
-    infoForTheTrainer,
-    pp,
-    d: dValue,
-  };
+  return { windowStart, windowEnd };
 };
 
-const normalizeHeader = (value) => {
-  if (!value) {
-    return "";
-  }
-  return String(value)
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+const fallbackAssignmentTime = (windowStart, trainingType) => {
+  const start = windowStart || new Date();
+  const end = new Date(start.getTime() + durationMinutesForType(trainingType) * 60000);
+  return { start, end };
 };
 
-const HEADER_ALIASES = {
-  monday: ["monday", "po", "pondeli", "pondělí"],
-  tuesday: ["tuesday", "tu", "utery", "úterý"],
-  wednesday: ["wednesday", "we", "streda", "středa"],
-  thursday: ["thursday", "th", "ctvrtek", "čtvrtek"],
-  friday: ["friday", "fr", "patek", "pátek"],
-  saturday: ["saturday", "sa", "sobota"],
-  sunday: ["sunday", "su", "nedele", "neděle"],
-  first_name: ["first_name", "firstname", "first name", "jmeno", "jméno"],
-  last_name: ["last_name", "lastname", "last name", "prijmeni", "příjmení"],
-  title_prefix: [
-    "title_prefix",
-    "title prefix",
-    "titul_pred_jmenem",
-    "titul před jménem",
-    "prefix",
-  ],
-  title_suffix: [
-    "title_suffix",
-    "title suffix",
-    "titul_za_jmenem",
-    "titul za jménem",
-    "suffix",
-  ],
-  lecture_name: [
-    "lecture_name",
-    "lecture name",
-    "training_type",
-    "training type",
-    "typ_skoleni",
-    "typ školení",
-    "typ skoleni",
-    "typ_kurzu",
-    "typ kurzu",
-    "nazev skoleni",
-    "název školení",
-    "nazev kurzu",
-    "název kurzu",
-  ],
-  hours: ["hours", "hodiny", "pocet_hodin", "počet hodin", "pocet hodin"],
-  students: [
-    "students",
-    "participants",
-    "ucastnici",
-    "účastníci",
-    "pocet_studentu",
-    "počet studentů",
-    "pocet studentu",
-    "max_participants",
-  ],
-  frequency_quantity: ["frequency_quantity", "frequency quantity", "frekvence_hodnota"],
-  frequency_period: ["frequency_period", "frequency period", "frekvence_jednotka"],
-  distance_limit: ["distance_limit", "distance limit", "limit_vzdalenosti"],
-  limit_note: ["limit_note", "limit note", "poznamka_k_limitu", "poznámka k limitu"],
-  akris: ["akris"],
-  call_before_training: [
-    "call_before_training",
-    "call before training",
-    "zavolat_pred_skolenim",
-    "zavolat před školením",
-  ],
-  email: ["email", "e-mail", "mail"],
-  phone: ["phone", "telefon", "tel"],
-  home_address: [
-    "home_address",
-    "home address",
-    "home",
-    "address",
-    "adresa",
-    "adresa_bydliste",
-    "bydliste",
-    "bydliště",
-  ],
-  home_lat: ["home_lat", "home latitude", "latitude", "sirka", "šířka", "zemepisna_sirka"],
-  home_lng: ["home_lng", "home longitude", "longitude", "delka", "délka", "zemepisna_delka"],
-  hourly_rate: [
-    "hourly_rate",
-    "hourly rate",
-    "hodinova_sazba",
-    "hodinová_sazba",
-    "hodinova_sazba_kc",
-  ],
-  travel_rate_km: [
-    "travel_rate_km",
-    "travel rate",
-    "travel_rate",
-    "cestovne",
-    "cestovné",
-    "cestovne_kc_km",
-  ],
-  notes: ["notes", "note", "poznamka", "poznámka", "poznamky", "poznámky"],
-};
-
-const HEADER_LOOKUP = Object.entries(HEADER_ALIASES).reduce((acc, [key, aliases]) => {
-  aliases.forEach((alias) => {
-    acc[normalizeHeader(alias)] = key;
-  });
-  return acc;
-}, {});
-
-const TRAINING_HEADER_ALIASES = {
-  start_date: ["start_date"],
-  end_date: ["end_date"],
-  training_name: ["training_name"],
-  visitors: ["visitors"],
-  accreditation: ["accreditation"],
-  hours: ["hours"],
-  start_time: ["start_time"],
-  end_time: ["end_time"],
-  trainers_fee: ["trainers_fee"],
-  price_w_vat: ["price_w_vat"],
-  payer_address: ["payer_address"],
-  payer_id: ["payer_id", "pyer_id"],
-  invoice_number: ["invoice_number"],
-  training_place: ["training_place"],
-  contact_name: ["contact_name"],
-  contact_phone: ["contact_phone"],
-  invoice_email: ["invoice_email"],
-  email_for_approval: ["email_for_approval"],
-  note: ["note"],
-  study_materials: ["study_materials"],
-  info_for_the_trainer: ["info_for_the_trainer"],
-  pp: ["pp"],
-  d: ["d"],
-};
-
-const TRAINING_HEADER_LOOKUP = Object.entries(TRAINING_HEADER_ALIASES).reduce(
-  (acc, [key, aliases]) => {
-    aliases.forEach((alias) => {
-      acc[normalizeHeader(alias)] = key;
-    });
-    return acc;
-  },
-  {}
-);
-
-const buildHeaderIndex = (headers, headerLookup = HEADER_LOOKUP) => {
-  const index = {};
-  headers.forEach((header, idx) => {
-    const normalized = normalizeHeader(header);
-    const key = headerLookup[normalized];
-    if (key && index[key] === undefined) {
-      index[key] = idx;
-    }
-  });
-  return index;
-};
-
-const detectDelimiter = (line) => {
-  const counts = { ",": 0, ";": 0, "\t": 0 };
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    if (char === "\"") {
-      inQuotes = !inQuotes;
-      continue;
-    }
-    if (!inQuotes && counts[char] !== undefined) {
-      counts[char] += 1;
-    }
-  }
-  if (counts[";"] >= counts[","] && counts[";"] >= counts["\t"] && counts[";"] > 0) {
-    return ";";
-  }
-  if (counts["\t"] > counts[","]) {
-    return "\t";
-  }
-  return ",";
-};
-
-const parseCsv = (input, delimiter) => {
-  const rows = [];
-  let row = [];
-  let current = "";
-  let inQuotes = false;
-  const text = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i];
-    if (inQuotes) {
-      if (char === "\"") {
-        if (text[i + 1] === "\"") {
-          current += "\"";
-          i += 1;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += char;
-      }
-      continue;
-    }
-
-    if (char === "\"") {
-      inQuotes = true;
-      continue;
-    }
-    if (char === delimiter) {
-      row.push(current);
-      current = "";
-      continue;
-    }
-    if (char === "\n") {
-      row.push(current);
-      rows.push(row);
-      row = [];
-      current = "";
-      continue;
-    }
-    current += char;
-  }
-
-  if (current.length || row.length) {
-    row.push(current);
-    rows.push(row);
-  }
-
-  return rows;
-};
-
-const parseCsvBoolean = (value, fallback) => {
-  if (value === null || value === undefined || String(value).trim() === "") {
-    return fallback;
-  }
-  const normalized = String(value).trim().toLowerCase();
-  if (["ano", "a", "true", "1", "yes", "y"].includes(normalized)) {
-    return true;
-  }
-  if (["ne", "n", "false", "0", "no"].includes(normalized)) {
-    return false;
-  }
-  return null;
-};
-
-const parseCsvNumber = (value) => {
-  if (value === null || value === undefined || String(value).trim() === "") {
-    return null;
-  }
-  const normalized = String(value).trim().replace(/\s+/g, "").replace(",", ".");
-  const parsed = Number(normalized);
-  if (Number.isNaN(parsed)) {
-    return null;
-  }
-  return parsed;
-};
-
-const buildGeocodeCandidates = (values) => {
-  const candidates = [];
-  values.forEach((value) => {
-    const trimmed = String(value || "").trim();
-    if (!trimmed) {
-      return;
-    }
-    if (!candidates.includes(trimmed)) {
-      candidates.push(trimmed);
-    }
-    const short = trimmed.split(",")[0].trim();
-    if (short && short !== trimmed && !candidates.includes(short)) {
-      candidates.push(short);
-    }
-  });
-  return candidates;
-};
-
-const geocodeFromCandidates = async (candidates) => {
-  for (const address of candidates) {
-    const geo = await geocodeAddress(address);
-    if (geo) {
-      return geo;
-    }
-  }
-  return null;
-};
-
-const parseCsvInteger = (value) => {
-  const parsed = parseCsvNumber(value);
-  if (parsed === null || !Number.isInteger(parsed)) {
-    return null;
-  }
-  return parsed;
-};
-
-const parseCsvMoney = (value) => {
-  if (value === null || value === undefined || String(value).trim() === "") {
-    return null;
-  }
-  const normalized = String(value).trim().replace(/\s+/g, "");
-  if (!normalized) {
-    return null;
-  }
-  const withoutDots = normalized.replace(/\./g, "");
-  if (withoutDots.includes(",")) {
-    const parts = withoutDots.split(",");
-    if (parts.length !== 2 || parts[1].length === 0) {
-      return null;
-    }
-    if (parts[1].length === 3) {
-      const combined = `${parts[0]}${parts[1]}`;
-      const parsed = Number(combined);
-      return Number.isNaN(parsed) ? null : parsed;
-    }
-    const parsed = Number(`${parts[0]}.${parts[1]}`);
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-  const parsed = Number(withoutDots);
-  if (Number.isNaN(parsed)) {
-    return null;
-  }
-  return parsed;
-};
-
-const buildRuleData = (trainerId, ruleType, value) => {
-  if (value === null || value === undefined || value === "") {
-    return null;
-  }
-  if (Array.isArray(value) && value.length === 0) {
-    return null;
-  }
-  return {
-    trainerId,
-    ruleType,
-    ruleValue: JSON.stringify({ value }),
-  };
-};
-
-const syncTrainerRelations = async (trainerId, trainingTypeIds, rules) => {
-  await prisma.trainerSkill.deleteMany({ where: { trainerId } });
-  if (trainingTypeIds.length) {
-    await prisma.trainerSkill.createMany({
-      data: trainingTypeIds.map((trainingTypeId) => ({ trainerId, trainingTypeId })),
-    });
-  }
-
-  await prisma.trainerRule.deleteMany({ where: { trainerId } });
-  if (rules.length) {
-    await prisma.trainerRule.createMany({ data: rules });
-  }
+const listIncludes = {
+  trainingType: true,
+  assignedTrainer: true,
 };
 
 const trainerIncludes = {
   skills: { include: { trainingType: true } },
-  rules: true,
+  availabilitySlots: {
+    orderBy: { startDatetime: "asc" },
+  },
 };
 
-const trainingIncludes = {
-  trainingType: true,
-  assignedTrainer: true,
+const sseClients = new Set();
+
+const broadcastEvent = (event, payload) => {
+  const body = JSON.stringify(payload || {});
+  sseClients.forEach((client) => {
+    try {
+      client.write(`event: ${event}\n`);
+      client.write(`data: ${body}\n\n`);
+    } catch (err) {
+      sseClients.delete(client);
+    }
+  });
+};
+
+setInterval(() => {
+  sseClients.forEach((client) => {
+    try {
+      client.write(`event: ping\ndata: {}\n\n`);
+    } catch (err) {
+      sseClients.delete(client);
+    }
+  });
+}, 25000);
+
+const offeredAndDeliveredByTrainer = async (trainerIds) => {
+  if (!trainerIds.length) {
+    return { offeredDatesByTrainer: {}, deliveredDatesByTrainer: {} };
+  }
+
+  const [slots, delivered] = await Promise.all([
+    prisma.trainerAvailabilitySlot.findMany({
+      where: {
+        trainerId: { in: trainerIds },
+        isActive: true,
+      },
+      select: {
+        trainerId: true,
+        startDatetime: true,
+      },
+    }),
+    prisma.training.findMany({
+      where: {
+        assignedTrainerId: { in: trainerIds },
+        status: { in: ["assigned", "confirmed"] },
+      },
+      select: {
+        assignedTrainerId: true,
+        startDatetime: true,
+      },
+    }),
+  ]);
+
+  const offeredDatesByTrainer = {};
+  slots.forEach((slot) => {
+    if (!offeredDatesByTrainer[slot.trainerId]) {
+      offeredDatesByTrainer[slot.trainerId] = [];
+    }
+    offeredDatesByTrainer[slot.trainerId].push(slot.startDatetime);
+  });
+
+  const deliveredDatesByTrainer = {};
+  delivered.forEach((item) => {
+    if (!item.assignedTrainerId) {
+      return;
+    }
+    if (!deliveredDatesByTrainer[item.assignedTrainerId]) {
+      deliveredDatesByTrainer[item.assignedTrainerId] = [];
+    }
+    deliveredDatesByTrainer[item.assignedTrainerId].push(item.startDatetime);
+  });
+
+  return { offeredDatesByTrainer, deliveredDatesByTrainer };
+};
+
+const recommendationsForTraining = async (training) => {
+  const windowStart = training.requestWindowStart || training.startDatetime;
+  const windowEnd = training.requestWindowEnd || training.endDatetime;
+
+  if (!(windowStart instanceof Date) || !(windowEnd instanceof Date)) {
+    return [];
+  }
+
+  const trainers = await prisma.trainer.findMany({
+    where: {
+      skills: {
+        some: {
+          trainingTypeId: training.trainingTypeId,
+        },
+      },
+    },
+    include: {
+      skills: true,
+    },
+  });
+
+  if (!trainers.length) {
+    return [];
+  }
+
+  const trainerIds = trainers.map((trainer) => trainer.id);
+  const [slots, maps] = await Promise.all([
+    prisma.trainerAvailabilitySlot.findMany({
+      where: {
+        trainerId: { in: trainerIds },
+        isActive: true,
+        OR: [
+          { assignedTrainingId: null },
+          { assignedTrainingId: training.id },
+        ],
+        startDatetime: { gte: windowStart },
+        endDatetime: { lte: windowEnd },
+      },
+      orderBy: [{ startDatetime: "asc" }],
+    }),
+    offeredAndDeliveredByTrainer(trainerIds),
+  ]);
+
+  const matches = recommendTrainerSlots({
+    training,
+    trainers,
+    slots,
+    deliveredDatesByTrainer: maps.deliveredDatesByTrainer,
+  });
+
+  return matches.map((match) => ({
+    trainer: trainerSummary(match.trainer),
+    slot: {
+      id: match.slot.id,
+      start_datetime: match.slot.startDatetime.toISOString(),
+      end_datetime: match.slot.endDatetime.toISOString(),
+    },
+    match_percent: Number(match.matchPercent.toFixed(2)),
+    reasons: match.reasons,
+    fairness: fairnessPayload(match.fairness),
+  }));
+};
+
+const ensureTrainerSkills = async (tx, trainerId, trainingTypeIds) => {
+  await tx.trainerSkill.deleteMany({ where: { trainerId } });
+  if (!trainingTypeIds.length) {
+    return;
+  }
+  await tx.trainerSkill.createMany({
+    data: trainingTypeIds.map((trainingTypeId) => ({ trainerId, trainingTypeId })),
+  });
+};
+
+const normalizeSlotPayload = (slots, errors) => {
+  if (!Array.isArray(slots)) {
+    return [];
+  }
+
+  const normalized = [];
+  slots.forEach((slot, idx) => {
+    const start = parseDateTime(slot.start_datetime || slot.startDatetime);
+    const end = parseDateTime(slot.end_datetime || slot.endDatetime);
+    if (!start) {
+      addError(errors, `availability_slots_${idx}_start`, "Enter a valid slot start.");
+      return;
+    }
+    if (!end) {
+      addError(errors, `availability_slots_${idx}_end`, "Enter a valid slot end.");
+      return;
+    }
+    if (end <= start) {
+      addError(errors, `availability_slots_${idx}_end`, "Slot end must be after start.");
+      return;
+    }
+    const isActive =
+      slot.is_active === undefined || slot.is_active === null
+        ? true
+        : Boolean(slot.is_active);
+    normalized.push({ startDatetime: start, endDatetime: end, isActive });
+  });
+
+  return normalized;
+};
+
+const replaceTrainerAvailabilitySlots = async (tx, trainerId, slots) => {
+  await tx.trainerAvailabilitySlot.deleteMany({
+    where: {
+      trainerId,
+      assignedTrainingId: null,
+    },
+  });
+
+  if (!slots.length) {
+    return;
+  }
+
+  await tx.trainerAvailabilitySlot.createMany({
+    data: slots.map((slot) => ({
+      trainerId,
+      startDatetime: slot.startDatetime,
+      endDatetime: slot.endDatetime,
+      isActive: slot.isActive,
+    })),
+  });
+};
+
+const fairnessForTrainerInMonth = async (trainerId, monthDate = new Date()) => {
+  const month = monthRangeForDate(monthDate);
+
+  const [trainerSlots, totalSlots, trainerDeliveries, totalDeliveries] = await Promise.all([
+    prisma.trainerAvailabilitySlot.findMany({
+      where: {
+        trainerId,
+        isActive: true,
+        startDatetime: { gte: month.start, lte: month.end },
+      },
+      select: { startDatetime: true },
+    }),
+    prisma.trainerAvailabilitySlot.findMany({
+      where: {
+        isActive: true,
+        startDatetime: { gte: month.start, lte: month.end },
+      },
+      select: { trainerId: true, startDatetime: true },
+    }),
+    prisma.training.findMany({
+      where: {
+        assignedTrainerId: trainerId,
+        status: { in: ["assigned", "confirmed"] },
+        startDatetime: { gte: month.start, lte: month.end },
+      },
+      select: { startDatetime: true },
+    }),
+    prisma.training.findMany({
+      where: {
+        assignedTrainerId: { not: null },
+        status: { in: ["assigned", "confirmed"] },
+        startDatetime: { gte: month.start, lte: month.end },
+      },
+      select: { assignedTrainerId: true, startDatetime: true },
+    }),
+  ]);
+
+  const distinctDays = (items) =>
+    new Set(items.map((item) => item.startDatetime.toISOString().slice(0, 10))).size;
+
+  const offeredDays = distinctDays(trainerSlots);
+
+  const offeredByTrainer = {};
+  totalSlots.forEach((slot) => {
+    if (!offeredByTrainer[slot.trainerId]) {
+      offeredByTrainer[slot.trainerId] = new Set();
+    }
+    offeredByTrainer[slot.trainerId].add(slot.startDatetime.toISOString().slice(0, 10));
+  });
+
+  const deliveredDays = distinctDays(trainerDeliveries);
+
+  const deliveredByTrainer = {};
+  totalDeliveries.forEach((item) => {
+    if (!item.assignedTrainerId) {
+      return;
+    }
+    if (!deliveredByTrainer[item.assignedTrainerId]) {
+      deliveredByTrainer[item.assignedTrainerId] = new Set();
+    }
+    deliveredByTrainer[item.assignedTrainerId].add(item.startDatetime.toISOString().slice(0, 10));
+  });
+
+  const totalOfferedDays = Object.values(offeredByTrainer).reduce(
+    (sum, set) => sum + set.size,
+    0
+  );
+  const totalDeliveredDays = Object.values(deliveredByTrainer).reduce(
+    (sum, set) => sum + set.size,
+    0
+  );
+
+  const targetShare = totalOfferedDays ? offeredDays / totalOfferedDays : 0;
+  const actualShare = totalDeliveredDays ? deliveredDays / totalDeliveredDays : 0;
+  const deviationRatio =
+    targetShare > 0 ? Math.abs(actualShare - targetShare) / targetShare : actualShare > 0 ? 1 : 0;
+
+  return {
+    offeredDays,
+    deliveredDays,
+    targetShare,
+    actualShare,
+    deviationRatio,
+    withinTolerance: deviationRatio <= 0.2,
+  };
+};
+
+const releaseTrainingSlot = async (tx, training, trainingType, nextStatus, changedBy) => {
+  await tx.trainerAvailabilitySlot.updateMany({
+    where: { assignedTrainingId: training.id },
+    data: { assignedTrainingId: null },
+  });
+
+  const fallback = fallbackAssignmentTime(training.requestWindowStart || training.startDatetime, trainingType);
+
+  return tx.training.update({
+    where: { id: training.id },
+    data: {
+      assignedTrainerId: null,
+      status: nextStatus,
+      startDatetime: fallback.start,
+      endDatetime: fallback.end,
+      changedBy,
+    },
+    include: listIncludes,
+  });
 };
 
 const api = express.Router();
@@ -567,12 +585,35 @@ api.post(
     const payload = req.body || {};
     const username = (payload.username || "").trim();
     const password = payload.password || "";
+
+    const key = loginAttemptKey(req, username);
+    const state = getLoginAttemptState(key);
+    if (state.lockedUntil && state.lockedUntil > Date.now()) {
+      const retryAfterSeconds = Math.ceil((state.lockedUntil - Date.now()) / 1000);
+      res.setHeader("Retry-After", String(retryAfterSeconds));
+      return res.status(429).json({
+        error: "Too many failed login attempts. Try again later.",
+        retry_after_seconds: retryAfterSeconds,
+      });
+    }
+
     if (!username || !password) {
+      failLoginAttempt(key);
       return res.status(400).json({ error: "Username and password are required." });
     }
     if (username !== config.adminUsername || password !== config.adminPassword) {
+      const failed = failLoginAttempt(key);
+      if (failed.lockedUntil && failed.lockedUntil > Date.now()) {
+        const retryAfterSeconds = Math.ceil((failed.lockedUntil - Date.now()) / 1000);
+        res.setHeader("Retry-After", String(retryAfterSeconds));
+        return res.status(429).json({
+          error: "Too many failed login attempts. Try again later.",
+          retry_after_seconds: retryAfterSeconds,
+        });
+      }
       return res.status(400).json({ error: "Invalid credentials." });
     }
+    clearLoginAttempts(req, username);
     req.session.user = { id: 1, username };
     return res.json({ ok: true, user: { id: 1, username } });
   })
@@ -591,1550 +632,38 @@ api.post(
 );
 
 api.get(
+  "/events/",
+  requireAuthSse,
+  asyncHandler(async (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+
+    res.write("event: ready\n");
+    res.write(`data: ${JSON.stringify({ ok: true })}\n\n`);
+
+    sseClients.add(res);
+    req.on("close", () => {
+      sseClients.delete(res);
+    });
+  })
+);
+
+api.get(
   "/meta/",
   requireAuth,
   asyncHandler(async (req, res) => {
     const [trainingTypes, trainers] = await Promise.all([
       prisma.trainingType.findMany({ orderBy: { name: "asc" } }),
-      prisma.trainer.findMany({
-        orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
-      }),
+      prisma.trainer.findMany({ orderBy: [{ lastName: "asc" }, { firstName: "asc" }] }),
     ]);
     res.json({
       training_types: trainingTypes.map(trainingTypePayload),
       trainer_choices: trainers.map(trainerSummary),
       status_choices: statusChoices(),
+      time_zone: config.timeZone,
     });
-  })
-);
-
-api.get(
-  "/trainings/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const filters = [];
-    if (req.query.status) {
-      filters.push({ status: String(req.query.status) });
-    }
-    const trainingTypeId = toInt(req.query.training_type);
-    if (trainingTypeId) {
-      filters.push({ trainingTypeId });
-    }
-    const startDate = parseDateOnly(req.query.start_date);
-    if (startDate) {
-      filters.push({ startDatetime: { gte: startOfDay(startDate) } });
-    }
-    const endDate = parseDateOnly(req.query.end_date);
-    if (endDate) {
-      filters.push({ startDatetime: { lte: endOfDay(endDate) } });
-    }
-    if (req.query.no_trainer) {
-      filters.push({
-        assignedTrainerId: null,
-        status: { in: ["draft", "waiting"] },
-      });
-    }
-    const where = filters.length ? { AND: filters } : undefined;
-
-    const trainings = await prisma.training.findMany({
-      where,
-      include: trainingIncludes,
-      orderBy: { startDatetime: "desc" },
-      take: 100,
-    });
-    res.json({ items: trainings.map(trainingListItem) });
-  })
-);
-
-api.post(
-  "/trainings/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const errors = {};
-    const trainingTypeId = toInt(payload.training_type);
-    if (!trainingTypeId) {
-      addError(errors, "training_type", "This field is required.");
-    }
-    const address = (payload.address || "").trim();
-    if (!address) {
-      addError(errors, "address", "This field is required.");
-    }
-    const startDatetime = parseDateTime(payload.start_datetime);
-    if (!startDatetime) {
-      addError(errors, "start_datetime", "Enter a valid date and time.");
-    }
-    const endDatetime = parseDateTime(payload.end_datetime);
-    if (!endDatetime) {
-      addError(errors, "end_datetime", "Enter a valid date and time.");
-    }
-    if (startDatetime && endDatetime && endDatetime <= startDatetime) {
-      addError(errors, "end_datetime", "End must be after start.");
-    }
-
-    const status = payload.status || "waiting";
-    if (!VALID_STATUSES.has(status)) {
-      addError(errors, "status", "Select a valid status.");
-    }
-
-    const assignedTrainerId =
-      payload.assigned_trainer === null || payload.assigned_trainer === ""
-        ? null
-        : toInt(payload.assigned_trainer);
-    if (
-      payload.assigned_trainer !== null &&
-      payload.assigned_trainer !== undefined &&
-      payload.assigned_trainer !== "" &&
-      !assignedTrainerId
-    ) {
-      addError(errors, "assigned_trainer", "Select a valid trainer.");
-    }
-
-    const lat = toNumber(payload.lat);
-    if (payload.lat !== null && payload.lat !== undefined && payload.lat !== "" && lat === null) {
-      addError(errors, "lat", "Enter a valid latitude.");
-    }
-    const lng = toNumber(payload.lng);
-    if (payload.lng !== null && payload.lng !== undefined && payload.lng !== "" && lng === null) {
-      addError(errors, "lng", "Enter a valid longitude.");
-    }
-
-    const extras = parseTrainingExtras(payload, errors);
-
-    if (hasErrors(errors)) {
-      return res.status(400).json({ errors });
-    }
-
-    const trainingType = await prisma.trainingType.findUnique({
-      where: { id: trainingTypeId },
-    });
-    if (!trainingType) {
-      addError(errors, "training_type", "Select a valid training type.");
-    }
-    if (assignedTrainerId) {
-      const trainer = await prisma.trainer.findUnique({ where: { id: assignedTrainerId } });
-      if (!trainer) {
-        addError(errors, "assigned_trainer", "Select a valid trainer.");
-      }
-    }
-    if (hasErrors(errors)) {
-      return res.status(400).json({ errors });
-    }
-
-    let resolvedLat = lat;
-    let resolvedLng = lng;
-    if (resolvedLat === null || resolvedLng === null) {
-      const geo = await geocodeAddress(address);
-      if (geo) {
-        resolvedLat = geo.lat;
-        resolvedLng = geo.lng;
-      }
-    }
-
-    const training = await prisma.training.create({
-      data: {
-        trainingTypeId,
-        customerName: payload.customer_name || "",
-        address,
-        lat: resolvedLat,
-        lng: resolvedLng,
-        startDatetime,
-        endDatetime,
-        status,
-        assignedTrainerId,
-        assignmentReason: payload.assignment_reason || "",
-        notes: payload.notes || "",
-        googleEventId: payload.google_event_id || "",
-        visitors: extras.visitors,
-        accreditation: extras.accreditation,
-        hours: extras.hours,
-        trainersFee: extras.trainersFee,
-        priceWithVat: extras.priceWithVat,
-        payerAddress: extras.payerAddress,
-        payerId: extras.payerId,
-        invoiceNumber: extras.invoiceNumber,
-        trainingPlace: extras.trainingPlace,
-        contactName: extras.contactName,
-        contactPhone: extras.contactPhone,
-        invoiceEmail: extras.invoiceEmail,
-        approvalEmail: extras.approvalEmail,
-        studyMaterials: extras.studyMaterials,
-        infoForTheTrainer: extras.infoForTheTrainer,
-        pp: extras.pp,
-        d: extras.d,
-      },
-      include: trainingIncludes,
-    });
-
-    return res.status(201).json({ item: trainingPayload(training) });
-  })
-);
-
-api.get(
-  "/trainings/:id/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const id = toInt(req.params.id);
-    if (!id) {
-      return res.status(404).json({ error: "Training not found." });
-    }
-    const training = await prisma.training.findUnique({
-      where: { id },
-      include: trainingIncludes,
-    });
-    if (!training) {
-      return res.status(404).json({ error: "Training not found." });
-    }
-
-    let resolvedTraining = training;
-    if (training.lat === null || training.lng === null) {
-      const candidates = buildGeocodeCandidates([
-        training.trainingPlace,
-        training.address,
-        training.payerAddress,
-      ]);
-      if (candidates.length) {
-        const geo = await geocodeFromCandidates(candidates);
-        if (geo) {
-          resolvedTraining = await prisma.training.update({
-            where: { id: training.id },
-            data: { lat: geo.lat, lng: geo.lng },
-            include: trainingIncludes,
-          });
-        }
-      }
-    }
-
-    const [trainers, existingTrainings] = await Promise.all([
-      prisma.trainer.findMany({ include: trainerIncludes }),
-      prisma.training.findMany({
-        where: { assignedTrainerId: { not: null }, status: { not: "canceled" } },
-        select: {
-          id: true,
-          assignedTrainerId: true,
-          startDatetime: true,
-          endDatetime: true,
-          lat: true,
-          lng: true,
-        },
-      }),
-    ]);
-
-    const recommendations = recommendTrainers(resolvedTraining, trainers, existingTrainings);
-    const matches = recommendations.matches.map((match) => ({
-      trainer: trainerSummary(match.trainer),
-      score: match.score,
-      estimated_cost: match.estimatedCost,
-      reasons: match.reasons,
-      warnings: match.warnings,
-    }));
-
-    return res.json({
-      item: trainingPayload(resolvedTraining),
-      recommendations: {
-        matches,
-        used_compromise: recommendations.usedCompromise,
-      },
-    });
-  })
-);
-
-api.put(
-  "/trainings/:id/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const id = toInt(req.params.id);
-    if (!id) {
-      return res.status(404).json({ error: "Training not found." });
-    }
-    const existing = await prisma.training.findUnique({ where: { id } });
-    if (!existing) {
-      return res.status(404).json({ error: "Training not found." });
-    }
-
-    const payload = req.body || {};
-    const errors = {};
-    const trainingTypeId = toInt(payload.training_type);
-    if (!trainingTypeId) {
-      addError(errors, "training_type", "This field is required.");
-    }
-    const address = (payload.address || "").trim();
-    if (!address) {
-      addError(errors, "address", "This field is required.");
-    }
-    const startDatetime = parseDateTime(payload.start_datetime);
-    if (!startDatetime) {
-      addError(errors, "start_datetime", "Enter a valid date and time.");
-    }
-    const endDatetime = parseDateTime(payload.end_datetime);
-    if (!endDatetime) {
-      addError(errors, "end_datetime", "Enter a valid date and time.");
-    }
-    if (startDatetime && endDatetime && endDatetime <= startDatetime) {
-      addError(errors, "end_datetime", "End must be after start.");
-    }
-
-    const status = payload.status || "waiting";
-    if (!VALID_STATUSES.has(status)) {
-      addError(errors, "status", "Select a valid status.");
-    }
-
-    const assignedTrainerId =
-      payload.assigned_trainer === null || payload.assigned_trainer === ""
-        ? null
-        : toInt(payload.assigned_trainer);
-    if (
-      payload.assigned_trainer !== null &&
-      payload.assigned_trainer !== undefined &&
-      payload.assigned_trainer !== "" &&
-      !assignedTrainerId
-    ) {
-      addError(errors, "assigned_trainer", "Select a valid trainer.");
-    }
-
-    const lat = toNumber(payload.lat);
-    if (payload.lat !== null && payload.lat !== undefined && payload.lat !== "" && lat === null) {
-      addError(errors, "lat", "Enter a valid latitude.");
-    }
-    const lng = toNumber(payload.lng);
-    if (payload.lng !== null && payload.lng !== undefined && payload.lng !== "" && lng === null) {
-      addError(errors, "lng", "Enter a valid longitude.");
-    }
-
-    const extras = parseTrainingExtras(payload, errors);
-
-    if (hasErrors(errors)) {
-      return res.status(400).json({ errors });
-    }
-
-    const trainingType = await prisma.trainingType.findUnique({
-      where: { id: trainingTypeId },
-    });
-    if (!trainingType) {
-      addError(errors, "training_type", "Select a valid training type.");
-    }
-    if (assignedTrainerId) {
-      const trainer = await prisma.trainer.findUnique({ where: { id: assignedTrainerId } });
-      if (!trainer) {
-        addError(errors, "assigned_trainer", "Select a valid trainer.");
-      }
-    }
-    if (hasErrors(errors)) {
-      return res.status(400).json({ errors });
-    }
-
-    let resolvedLat = lat;
-    let resolvedLng = lng;
-    if (resolvedLat === null || resolvedLng === null) {
-      const geo = await geocodeAddress(address);
-      if (geo) {
-        resolvedLat = geo.lat;
-        resolvedLng = geo.lng;
-      }
-    }
-
-    const training = await prisma.training.update({
-      where: { id },
-      data: {
-        trainingTypeId,
-        customerName: payload.customer_name || "",
-        address,
-        lat: resolvedLat,
-        lng: resolvedLng,
-        startDatetime,
-        endDatetime,
-        status,
-        assignedTrainerId,
-        assignmentReason: payload.assignment_reason || "",
-        notes: payload.notes || "",
-        googleEventId: payload.google_event_id || "",
-        visitors: extras.visitors,
-        accreditation: extras.accreditation,
-        hours: extras.hours,
-        trainersFee: extras.trainersFee,
-        priceWithVat: extras.priceWithVat,
-        payerAddress: extras.payerAddress,
-        payerId: extras.payerId,
-        invoiceNumber: extras.invoiceNumber,
-        trainingPlace: extras.trainingPlace,
-        contactName: extras.contactName,
-        contactPhone: extras.contactPhone,
-        invoiceEmail: extras.invoiceEmail,
-        approvalEmail: extras.approvalEmail,
-        studyMaterials: extras.studyMaterials,
-        infoForTheTrainer: extras.infoForTheTrainer,
-        pp: extras.pp,
-        d: extras.d,
-      },
-      include: trainingIncludes,
-    });
-
-    return res.json({ item: trainingPayload(training) });
-  })
-);
-
-api.patch(
-  "/trainings/:id/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const id = toInt(req.params.id);
-    if (!id) {
-      return res.status(404).json({ error: "Training not found." });
-    }
-
-    const training = await prisma.training.findUnique({
-      where: { id },
-      include: trainingIncludes,
-    });
-    if (!training) {
-      return res.status(404).json({ error: "Training not found." });
-    }
-
-    const payload = req.body || {};
-    const errors = {};
-
-    const status =
-      payload.status === undefined || payload.status === null || payload.status === ""
-        ? training.status
-        : payload.status;
-    if (!VALID_STATUSES.has(status)) {
-      addError(errors, "status", "Select a valid status.");
-    }
-
-    let assignedTrainerId = training.assignedTrainerId;
-    if (Object.prototype.hasOwnProperty.call(payload, "assigned_trainer")) {
-      if (payload.assigned_trainer === null || payload.assigned_trainer === "") {
-        assignedTrainerId = null;
-      } else {
-        assignedTrainerId = toInt(payload.assigned_trainer);
-        if (!assignedTrainerId) {
-          addError(errors, "assigned_trainer", "Select a valid trainer.");
-        }
-      }
-    }
-
-    if (hasErrors(errors)) {
-      return res.status(400).json({ errors });
-    }
-
-    if (assignedTrainerId) {
-      const trainer = await prisma.trainer.findUnique({ where: { id: assignedTrainerId } });
-      if (!trainer) {
-        addError(errors, "assigned_trainer", "Select a valid trainer.");
-      }
-    }
-    if (hasErrors(errors)) {
-      return res.status(400).json({ errors });
-    }
-
-    const updated = await prisma.training.update({
-      where: { id },
-      data: {
-        status,
-        assignedTrainerId,
-        customerName:
-          payload.customer_name === undefined ? training.customerName : payload.customer_name || "",
-        assignmentReason:
-          payload.assignment_reason === undefined
-            ? training.assignmentReason
-            : payload.assignment_reason || "",
-        notes: payload.notes === undefined ? training.notes : payload.notes || "",
-      },
-      include: trainingIncludes,
-    });
-
-    return res.json({ item: trainingPayload(updated) });
-  })
-);
-
-api.post(
-  "/trainings/bulk-delete/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const ids = Array.isArray(payload.ids) ? payload.ids : [];
-    if (!ids.length) {
-      return res.status(400).json({ error: "Seznam ID je povinný." });
-    }
-
-    const parsedIds = [];
-    const invalidIds = [];
-    ids.forEach((value) => {
-      const parsed = toInt(value);
-      if (!parsed) {
-        invalidIds.push(value);
-      } else {
-        parsedIds.push(parsed);
-      }
-    });
-
-    if (invalidIds.length) {
-      return res.status(400).json({ error: "Neplatná ID školení." });
-    }
-
-    const uniqueIds = Array.from(new Set(parsedIds));
-    const existing = await prisma.training.findMany({
-      where: { id: { in: uniqueIds } },
-      select: { id: true },
-    });
-    const existingIds = new Set(existing.map((item) => item.id));
-    const missingIds = uniqueIds.filter((id) => !existingIds.has(id));
-
-    if (existingIds.size) {
-      await prisma.training.deleteMany({
-        where: { id: { in: Array.from(existingIds) } },
-      });
-    }
-
-    return res.json({
-      summary: {
-        requested: uniqueIds.length,
-        deleted: existingIds.size,
-        missing: missingIds.length,
-      },
-      missing_ids: missingIds,
-    });
-  })
-);
-
-api.post(
-  "/trainings/import/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const csv = payload.csv;
-    if (!csv || typeof csv !== "string") {
-      return res.status(400).json({ error: "CSV obsah je povinný." });
-    }
-
-    const text = csv.charCodeAt(0) === 0xfeff ? csv.slice(1) : csv;
-    const firstLine = text.split(/\r?\n/, 1)[0] || "";
-    const delimiter = detectDelimiter(firstLine);
-    const rows = parseCsv(text, delimiter);
-    if (!rows.length) {
-      return res.status(400).json({ error: "CSV soubor je prázdný." });
-    }
-
-    const headers = rows[0].map((header) => String(header || "").trim());
-    const headerIndex = buildHeaderIndex(headers, TRAINING_HEADER_LOOKUP);
-    const requiredHeaders = ["start_date", "training_name", "start_time", "end_time"];
-    const missingHeaders = requiredHeaders.filter((key) => headerIndex[key] === undefined);
-    if (missingHeaders.length) {
-      return res.status(400).json({
-        error: `Chybí povinné sloupce: ${missingHeaders.join(", ")}.`,
-      });
-    }
-    if (headerIndex.training_place === undefined && headerIndex.payer_address === undefined) {
-      return res.status(400).json({
-        error: "Chybí povinný sloupec: training_place nebo payer_address.",
-      });
-    }
-
-    const dryRun = payload.dry_run === true;
-    const errors = [];
-    let imported = 0;
-    let skipped = 0;
-
-    const getValue = (row, key) => {
-      const idx = headerIndex[key];
-      if (idx === undefined) {
-        return "";
-      }
-      return row[idx] ?? "";
-    };
-
-    const normalizeTime = (value) => {
-      if (value === null || value === undefined) {
-        return null;
-      }
-      const raw = String(value).trim();
-      if (!raw) {
-        return null;
-      }
-      const normalized = raw.replace(",", ":").replace(".", ":");
-      const match = normalized.match(/^(\d{1,2})(?::(\d{1,2}))?(?::\d{1,2})?$/);
-      if (!match) {
-        return null;
-      }
-      const hours = Number(match[1]);
-      const minutes = Number(match[2] || "0");
-      if (
-        Number.isNaN(hours) ||
-        Number.isNaN(minutes) ||
-        hours < 0 ||
-        hours > 23 ||
-        minutes < 0 ||
-        minutes > 59
-      ) {
-        return null;
-      }
-      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-    };
-
-    const trainingTypes = await prisma.trainingType.findMany();
-    const trainingTypeIndex = new Map(
-      trainingTypes.map((item) => [normalizeHeader(item.name), item])
-    );
-
-    const ensureTrainingType = async (name) => {
-      const key = normalizeHeader(name);
-      const existing = trainingTypeIndex.get(key);
-      if (existing) {
-        return existing;
-      }
-      if (dryRun) {
-        const placeholder = { id: null, name };
-        trainingTypeIndex.set(key, placeholder);
-        return placeholder;
-      }
-      const created = await prisma.trainingType.create({ data: { name } });
-      trainingTypeIndex.set(key, created);
-      return created;
-    };
-
-    for (let i = 1; i < rows.length; i += 1) {
-      const row = rows[i];
-      const rowNumber = i + 1;
-      if (!row || row.every((cell) => !String(cell || "").trim())) {
-        continue;
-      }
-
-      const rowErrors = [];
-      const trainingName = String(getValue(row, "training_name") || "").trim();
-      if (!trainingName) {
-        rowErrors.push({ field: "training_name", message: "Název školení je povinný." });
-      }
-
-      const startDateRaw = String(getValue(row, "start_date") || "").trim();
-      const startDate = parseDateOnly(startDateRaw);
-      if (!startDate) {
-        rowErrors.push({ field: "start_date", message: "Neplatné datum začátku." });
-      }
-
-      const endDateRaw = String(getValue(row, "end_date") || "").trim();
-      let endDate = startDate;
-      if (endDateRaw) {
-        endDate = parseDateOnly(endDateRaw);
-        if (!endDate) {
-          rowErrors.push({ field: "end_date", message: "Neplatné datum konce." });
-        }
-      }
-
-      const startTimeRaw = String(getValue(row, "start_time") || "").trim();
-      const startTime = normalizeTime(startTimeRaw);
-      if (!startTime) {
-        rowErrors.push({ field: "start_time", message: "Neplatný čas začátku." });
-      }
-      const endTimeRaw = String(getValue(row, "end_time") || "").trim();
-      const endTime = normalizeTime(endTimeRaw);
-      if (!endTime) {
-        rowErrors.push({ field: "end_time", message: "Neplatný čas konce." });
-      }
-
-      const startDatetime =
-        startDate && startTime ? parseDateTime(`${formatDate(startDate)}T${startTime}`) : null;
-      const endDatetime =
-        endDate && endTime ? parseDateTime(`${formatDate(endDate)}T${endTime}`) : null;
-      if (!startDatetime) {
-        rowErrors.push({ field: "start_date", message: "Neplatný termín školení." });
-      }
-      if (!endDatetime) {
-        rowErrors.push({ field: "end_date", message: "Neplatný termín školení." });
-      }
-      if (startDatetime && endDatetime && endDatetime <= startDatetime) {
-        rowErrors.push({ field: "end_time", message: "Konec musí být po začátku." });
-      }
-
-      const visitors = parseCsvInteger(getValue(row, "visitors"));
-      if (getValue(row, "visitors") && visitors === null) {
-        rowErrors.push({ field: "visitors", message: "Neplatný počet účastníků." });
-      }
-
-      const accreditationRaw = getValue(row, "accreditation");
-      const accreditation = parseCsvBoolean(accreditationRaw, null);
-      if (accreditationRaw && accreditation === null) {
-        rowErrors.push({ field: "accreditation", message: "Akreditace musí být Ano/Ne." });
-      }
-
-      const hours = parseCsvInteger(getValue(row, "hours"));
-      if (getValue(row, "hours") && hours === null) {
-        rowErrors.push({ field: "hours", message: "Neplatný počet hodin." });
-      }
-
-      const trainersFee = parseCsvMoney(getValue(row, "trainers_fee"));
-      if (getValue(row, "trainers_fee") && trainersFee === null) {
-        rowErrors.push({ field: "trainers_fee", message: "Neplatná odměna lektora." });
-      }
-
-      const priceWithVat = parseCsvMoney(getValue(row, "price_w_vat"));
-      if (getValue(row, "price_w_vat") && priceWithVat === null) {
-        rowErrors.push({ field: "price_w_vat", message: "Neplatná cena s DPH." });
-      }
-
-      const payerAddress = String(getValue(row, "payer_address") || "").trim();
-      const payerId = String(getValue(row, "payer_id") || "").trim();
-      const invoiceNumber = String(getValue(row, "invoice_number") || "").trim();
-      const trainingPlace = String(getValue(row, "training_place") || "").trim();
-      const address = trainingPlace || payerAddress;
-      if (!address) {
-        rowErrors.push({ field: "training_place", message: "Místo školení je povinné." });
-      }
-
-      const contactName = String(getValue(row, "contact_name") || "").trim();
-      const contactPhone = String(getValue(row, "contact_phone") || "").trim();
-      const invoiceEmail = String(getValue(row, "invoice_email") || "").trim();
-      if (invoiceEmail && !invoiceEmail.includes("@")) {
-        rowErrors.push({ field: "invoice_email", message: "Neplatný e-mail." });
-      }
-      const approvalEmail = String(getValue(row, "email_for_approval") || "").trim();
-      if (approvalEmail && !approvalEmail.includes("@")) {
-        rowErrors.push({ field: "email_for_approval", message: "Neplatný e-mail." });
-      }
-
-      const note = String(getValue(row, "note") || "").trim();
-      const studyMaterials = String(getValue(row, "study_materials") || "").trim();
-      const infoForTheTrainer = String(getValue(row, "info_for_the_trainer") || "").trim();
-      const pp = String(getValue(row, "pp") || "").trim();
-      const dValue = String(getValue(row, "d") || "").trim();
-
-      if (rowErrors.length) {
-        errors.push({ row: rowNumber, errors: rowErrors });
-        skipped += 1;
-        continue;
-      }
-
-      if (!dryRun) {
-        const trainingType = await ensureTrainingType(trainingName);
-        const customerName = payerAddress || trainingPlace || "";
-        let resolvedLat = null;
-        let resolvedLng = null;
-        const candidates = buildGeocodeCandidates([trainingPlace, payerAddress, address]);
-        if (candidates.length) {
-          const geo = await geocodeFromCandidates(candidates);
-          if (geo) {
-            resolvedLat = geo.lat;
-            resolvedLng = geo.lng;
-          }
-        }
-
-        await prisma.training.create({
-          data: {
-            trainingTypeId: trainingType.id,
-            customerName,
-            address,
-            lat: resolvedLat,
-            lng: resolvedLng,
-            startDatetime,
-            endDatetime,
-            status: "waiting",
-            assignedTrainerId: null,
-            assignmentReason: "",
-            notes: note,
-            googleEventId: "",
-            visitors,
-            accreditation,
-            hours,
-            trainersFee,
-            priceWithVat,
-            payerAddress: payerAddress || null,
-            payerId: payerId || null,
-            invoiceNumber: invoiceNumber || null,
-            trainingPlace: trainingPlace || null,
-            contactName: contactName || null,
-            contactPhone: contactPhone || null,
-            invoiceEmail: invoiceEmail || null,
-            approvalEmail: approvalEmail || null,
-            studyMaterials: studyMaterials || null,
-            infoForTheTrainer: infoForTheTrainer || null,
-            pp: pp || null,
-            d: dValue || null,
-          },
-        });
-      }
-
-      imported += 1;
-    }
-
-    return res.json({
-      dry_run: dryRun,
-      summary: {
-        total_rows: rows.length - 1,
-        imported,
-        skipped,
-        errors: errors.length,
-      },
-      errors,
-    });
-  })
-);
-
-api.get(
-  "/trainers/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const trainers = await prisma.trainer.findMany({
-      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
-    });
-    if (!trainers.length) {
-      return res.json({ items: [] });
-    }
-
-    const trainerIds = trainers.map((trainer) => trainer.id);
-    const now = new Date();
-
-    const [trainingCounts, upcomingTrainings] = await Promise.all([
-      prisma.training.groupBy({
-        by: ["assignedTrainerId"],
-        where: {
-          assignedTrainerId: { in: trainerIds },
-          status: { not: "canceled" },
-        },
-        _count: { _all: true },
-      }),
-      prisma.training.findMany({
-        where: {
-          assignedTrainerId: { in: trainerIds },
-          status: { not: "canceled" },
-          startDatetime: { gte: now },
-        },
-        include: trainingIncludes,
-        orderBy: { startDatetime: "asc" },
-      }),
-    ]);
-
-    const countsByTrainer = trainingCounts.reduce((acc, item) => {
-      if (item.assignedTrainerId) {
-        acc[item.assignedTrainerId] = item._count._all;
-      }
-      return acc;
-    }, {});
-
-    const nextTrainingByTrainer = upcomingTrainings.reduce((acc, training) => {
-      if (training.assignedTrainerId && !acc[training.assignedTrainerId]) {
-        acc[training.assignedTrainerId] = training;
-      }
-      return acc;
-    }, {});
-
-    const items = trainers.map((trainer) => {
-      const payload = trainerPayload(trainer, false);
-      payload.assigned_trainings_count = countsByTrainer[trainer.id] || 0;
-      const nextTraining = nextTrainingByTrainer[trainer.id];
-      payload.next_assigned_training = nextTraining ? trainingListItem(nextTraining) : null;
-      return payload;
-    });
-
-    return res.json({ items });
-  })
-);
-
-api.post(
-  "/trainers/import/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const csv = payload.csv;
-    if (!csv || typeof csv !== "string") {
-      return res.status(400).json({ error: "CSV obsah je povinný." });
-    }
-
-    const text = csv.charCodeAt(0) === 0xfeff ? csv.slice(1) : csv;
-    const firstLine = text.split(/\r?\n/, 1)[0] || "";
-    const delimiter = detectDelimiter(firstLine);
-    const rows = parseCsv(text, delimiter);
-    if (!rows.length) {
-      return res.status(400).json({ error: "CSV soubor je prázdný." });
-    }
-
-    const headers = rows[0].map((header) => String(header || "").trim());
-    const headerIndex = buildHeaderIndex(headers);
-    const requiredHeaders = ["first_name", "last_name", "home_address"];
-    const missingHeaders = requiredHeaders.filter((key) => headerIndex[key] === undefined);
-    if (missingHeaders.length) {
-      return res.status(400).json({
-        error: `Chybí povinné sloupce: ${missingHeaders.join(", ")}.`,
-      });
-    }
-
-    const dryRun = payload.dry_run === true;
-    const errors = [];
-    let imported = 0;
-    let skipped = 0;
-
-    const getValue = (row, key) => {
-      const idx = headerIndex[key];
-      if (idx === undefined) {
-        return "";
-      }
-      return row[idx] ?? "";
-    };
-
-    const weekdayColumns = [
-      { key: "monday", value: 0 },
-      { key: "tuesday", value: 1 },
-      { key: "wednesday", value: 2 },
-      { key: "thursday", value: 3 },
-      { key: "friday", value: 4 },
-      { key: "saturday", value: 5 },
-      { key: "sunday", value: 6 },
-    ];
-
-    for (let i = 1; i < rows.length; i += 1) {
-      const row = rows[i];
-      const rowNumber = i + 1;
-      if (!row || row.every((cell) => !String(cell || "").trim())) {
-        continue;
-      }
-
-      const rowErrors = [];
-      const firstName = String(getValue(row, "first_name")).trim();
-      if (!firstName) {
-        rowErrors.push({ field: "first_name", message: "Jméno je povinné." });
-      }
-      const lastName = String(getValue(row, "last_name")).trim();
-      if (!lastName) {
-        rowErrors.push({ field: "last_name", message: "Příjmení je povinné." });
-      }
-      const homeAddress = String(getValue(row, "home_address")).trim();
-      if (!homeAddress) {
-        rowErrors.push({ field: "home_address", message: "Adresa je povinná." });
-      }
-
-      const titlePrefix = String(getValue(row, "title_prefix") || "").trim();
-      const titleSuffix = String(getValue(row, "title_suffix") || "").trim();
-      const email = String(getValue(row, "email") || "").trim();
-      if (email && !email.includes("@")) {
-        rowErrors.push({ field: "email", message: "Neplatný e-mail." });
-      }
-      const phone = String(getValue(row, "phone") || "").trim();
-
-      const akris = parseCsvBoolean(getValue(row, "akris"), false);
-      if (akris === null) {
-        rowErrors.push({ field: "akris", message: "AKRIS musí být Ano/Ne." });
-      }
-      const callBeforeTraining = parseCsvBoolean(getValue(row, "call_before_training"), false);
-      if (callBeforeTraining === null) {
-        rowErrors.push({
-          field: "call_before_training",
-          message: "Zavolat před školením musí být Ano/Ne.",
-        });
-      }
-
-      const frequencyQuantity = String(getValue(row, "frequency_quantity") || "").trim();
-      const frequencyPeriod = String(getValue(row, "frequency_period") || "").trim();
-
-      const maxDistance = parseCsvNumber(getValue(row, "distance_limit"));
-      if (getValue(row, "distance_limit") && maxDistance === null) {
-        rowErrors.push({ field: "distance_limit", message: "Neplatný limit vzdálenosti." });
-      } else if (maxDistance !== null && maxDistance < 1) {
-        rowErrors.push({ field: "distance_limit", message: "Limit vzdálenosti musí být > 0." });
-      }
-
-      const preferredWeekdays = [];
-      for (const day of weekdayColumns) {
-        const raw = getValue(row, day.key);
-        const parsed = parseCsvBoolean(raw, false);
-        if (raw && parsed === null) {
-          rowErrors.push({
-            field: day.key,
-            message: "Neplatná hodnota pro den v týdnu (použijte Ano/Ne nebo 1/0).",
-          });
-        } else if (parsed) {
-          preferredWeekdays.push(day.value);
-        }
-      }
-
-      const homeLat = parseCsvNumber(getValue(row, "home_lat"));
-      if (getValue(row, "home_lat") && homeLat === null) {
-        rowErrors.push({ field: "home_lat", message: "Neplatná zeměpisná šířka." });
-      }
-      const homeLng = parseCsvNumber(getValue(row, "home_lng"));
-      if (getValue(row, "home_lng") && homeLng === null) {
-        rowErrors.push({ field: "home_lng", message: "Neplatná zeměpisná délka." });
-      }
-
-      const hourlyRate = parseCsvNumber(getValue(row, "hourly_rate"));
-      if (getValue(row, "hourly_rate") && hourlyRate === null) {
-        rowErrors.push({ field: "hourly_rate", message: "Neplatná hodinová sazba." });
-      }
-      const travelRateKm = parseCsvNumber(getValue(row, "travel_rate_km"));
-      if (getValue(row, "travel_rate_km") && travelRateKm === null) {
-        rowErrors.push({ field: "travel_rate_km", message: "Neplatné cestovné." });
-      }
-
-      const limitNote = String(getValue(row, "limit_note") || "").trim();
-      const notes = String(getValue(row, "notes") || "").trim();
-
-      if (rowErrors.length) {
-        errors.push({ row: rowNumber, errors: rowErrors });
-        skipped += 1;
-        continue;
-      }
-
-      if (!dryRun) {
-        let trainer = await prisma.trainer.create({
-          data: {
-            firstName,
-            lastName,
-            titlePrefix,
-            titleSuffix,
-            akris,
-            callBeforeTraining,
-            frequencyQuantity: frequencyQuantity || null,
-            frequencyPeriod: frequencyPeriod || null,
-            limitNote: limitNote || null,
-            email,
-            phone,
-            homeAddress,
-            homeLat,
-            homeLng,
-            hourlyRate,
-            travelRateKm,
-            notes,
-          },
-        });
-
-        const ruleData = [
-          buildRuleData(trainer.id, "max_distance_km", maxDistance),
-          buildRuleData(trainer.id, "preferred_weekdays", preferredWeekdays),
-        ].filter(Boolean);
-
-        if (ruleData.length) {
-          await syncTrainerRelations(trainer.id, [], ruleData);
-        }
-
-        if (trainer.homeLat === null || trainer.homeLng === null) {
-          const geo = await geocodeAddress(trainer.homeAddress);
-          if (geo) {
-            trainer = await prisma.trainer.update({
-              where: { id: trainer.id },
-              data: { homeLat: geo.lat, homeLng: geo.lng },
-            });
-          }
-        }
-      }
-
-      imported += 1;
-    }
-
-    return res.json({
-      dry_run: dryRun,
-      summary: {
-        total_rows: rows.length - 1,
-        imported,
-        skipped,
-        errors: errors.length,
-      },
-      errors,
-    });
-  })
-);
-
-api.post(
-  "/trainers/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const errors = {};
-
-    const firstName = (payload.first_name || "").trim();
-    if (!firstName) {
-      addError(errors, "first_name", "This field is required.");
-    }
-    const lastName = (payload.last_name || "").trim();
-    if (!lastName) {
-      addError(errors, "last_name", "This field is required.");
-    }
-    const titlePrefix = (payload.title_prefix || "").trim();
-    const titleSuffix = (payload.title_suffix || "").trim();
-    const akris = parseBoolean(payload.akris);
-    if (akris === null) {
-      addError(errors, "akris", "Select a valid value.");
-    }
-    const callBeforeTraining = parseBoolean(payload.call_before_training);
-    if (callBeforeTraining === null) {
-      addError(errors, "call_before_training", "Select a valid value.");
-    }
-    const frequencyQuantity = (payload.frequency_quantity || "").trim() || null;
-    const frequencyPeriod = (payload.frequency_period || "").trim() || null;
-    const limitNote = (payload.limit_note || "").trim() || null;
-    const homeAddress = (payload.home_address || "").trim();
-    if (!homeAddress) {
-      addError(errors, "home_address", "This field is required.");
-    }
-
-    const email = payload.email || "";
-    if (email && !String(email).includes("@")) {
-      addError(errors, "email", "Enter a valid email address.");
-    }
-
-    const phone = payload.phone || "";
-    const homeLat = toNumber(payload.home_lat);
-    if (
-      payload.home_lat !== null &&
-      payload.home_lat !== undefined &&
-      payload.home_lat !== "" &&
-      homeLat === null
-    ) {
-      addError(errors, "home_lat", "Enter a valid latitude.");
-    }
-    const homeLng = toNumber(payload.home_lng);
-    if (
-      payload.home_lng !== null &&
-      payload.home_lng !== undefined &&
-      payload.home_lng !== "" &&
-      homeLng === null
-    ) {
-      addError(errors, "home_lng", "Enter a valid longitude.");
-    }
-
-    const hourlyRate = toNumber(payload.hourly_rate);
-    if (
-      payload.hourly_rate !== null &&
-      payload.hourly_rate !== undefined &&
-      payload.hourly_rate !== "" &&
-      hourlyRate === null
-    ) {
-      addError(errors, "hourly_rate", "Enter a valid number.");
-    }
-    const travelRateKm = toNumber(payload.travel_rate_km);
-    if (
-      payload.travel_rate_km !== null &&
-      payload.travel_rate_km !== undefined &&
-      payload.travel_rate_km !== "" &&
-      travelRateKm === null
-    ) {
-      addError(errors, "travel_rate_km", "Enter a valid number.");
-    }
-
-    const trainingTypes = Array.isArray(payload.training_types) ? payload.training_types : [];
-    const trainingTypeIds = trainingTypes
-      .map((value) => toInt(value))
-      .filter((value) => value !== null);
-
-    const maxDistance = toNumber(payload.max_distance_km);
-    if (
-      payload.max_distance_km !== null &&
-      payload.max_distance_km !== undefined &&
-      payload.max_distance_km !== "" &&
-      maxDistance === null
-    ) {
-      addError(errors, "max_distance_km", "Enter a valid number.");
-    } else if (maxDistance !== null && maxDistance < 1) {
-      addError(errors, "max_distance_km", "Ensure this value is greater than 0.");
-    }
-
-    const weekendAllowed =
-      payload.weekend_allowed === undefined
-        ? null
-        : parseBoolean(payload.weekend_allowed);
-    if (payload.weekend_allowed !== undefined && weekendAllowed === null) {
-      addError(errors, "weekend_allowed", "Select a valid value.");
-    }
-
-    const maxLongTrips = toNumber(payload.max_long_trips_per_month);
-    if (
-      payload.max_long_trips_per_month !== null &&
-      payload.max_long_trips_per_month !== undefined &&
-      payload.max_long_trips_per_month !== "" &&
-      maxLongTrips === null
-    ) {
-      addError(errors, "max_long_trips_per_month", "Enter a valid number.");
-    } else if (maxLongTrips !== null && maxLongTrips < 0) {
-      addError(errors, "max_long_trips_per_month", "Ensure this value is 0 or higher.");
-    }
-
-    const preferredWeekdays = Array.isArray(payload.preferred_weekdays)
-      ? payload.preferred_weekdays
-          .map((value) => toInt(value))
-          .filter((value) => value !== null && value >= 0 && value <= 6)
-      : [];
-
-    if (hasErrors(errors)) {
-      return res.status(400).json({ errors });
-    }
-
-    if (trainingTypeIds.length) {
-      const existingTypes = await prisma.trainingType.findMany({
-        where: { id: { in: trainingTypeIds } },
-        select: { id: true },
-      });
-      if (existingTypes.length !== trainingTypeIds.length) {
-        addError(errors, "training_types", "Select a valid training type.");
-      }
-    }
-
-    if (hasErrors(errors)) {
-      return res.status(400).json({ errors });
-    }
-
-    const trainer = await prisma.trainer.create({
-      data: {
-        firstName,
-        lastName,
-        titlePrefix,
-        titleSuffix,
-        akris,
-        callBeforeTraining,
-        frequencyQuantity,
-        frequencyPeriod,
-        limitNote,
-        email,
-        phone,
-        homeAddress,
-        homeLat,
-        homeLng,
-        hourlyRate,
-        travelRateKm,
-        notes: payload.notes || "",
-      },
-    });
-
-    const ruleData = [
-      buildRuleData(trainer.id, "max_distance_km", maxDistance),
-      buildRuleData(trainer.id, "weekend_allowed", weekendAllowed),
-      buildRuleData(trainer.id, "max_long_trips_per_month", maxLongTrips),
-      buildRuleData(trainer.id, "preferred_weekdays", preferredWeekdays),
-    ].filter(Boolean);
-
-    await syncTrainerRelations(trainer.id, trainingTypeIds, ruleData);
-
-    const trainerFull = await prisma.trainer.findUnique({
-      where: { id: trainer.id },
-      include: trainerIncludes,
-    });
-
-    let updatedTrainer = trainerFull;
-    if (updatedTrainer.homeLat === null || updatedTrainer.homeLng === null) {
-      const geo = await geocodeAddress(updatedTrainer.homeAddress);
-      if (geo) {
-        updatedTrainer = await prisma.trainer.update({
-          where: { id: updatedTrainer.id },
-          data: { homeLat: geo.lat, homeLng: geo.lng },
-          include: trainerIncludes,
-        });
-      }
-    }
-
-    return res.status(201).json({ item: trainerPayload(updatedTrainer, true) });
-  })
-);
-
-api.post(
-  "/trainers/bulk-delete/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const ids = Array.isArray(payload.ids) ? payload.ids : [];
-    if (!ids.length) {
-      return res.status(400).json({ error: "Seznam ID je povinný." });
-    }
-
-    const parsedIds = [];
-    const invalidIds = [];
-    ids.forEach((value) => {
-      const parsed = toInt(value);
-      if (!parsed) {
-        invalidIds.push(value);
-      } else {
-        parsedIds.push(parsed);
-      }
-    });
-
-    if (invalidIds.length) {
-      return res.status(400).json({ error: "Neplatná ID trenérů." });
-    }
-
-    const uniqueIds = Array.from(new Set(parsedIds));
-    const existing = await prisma.trainer.findMany({
-      where: { id: { in: uniqueIds } },
-      select: { id: true },
-    });
-    const existingIds = new Set(existing.map((item) => item.id));
-    const missingIds = uniqueIds.filter((id) => !existingIds.has(id));
-
-    let deletedCount = 0;
-    if (existingIds.size) {
-      const result = await prisma.trainer.deleteMany({
-        where: { id: { in: Array.from(existingIds) } },
-      });
-      deletedCount = result.count;
-    }
-
-    return res.json({
-      summary: {
-        requested: uniqueIds.length,
-        deleted: deletedCount,
-        missing: missingIds.length,
-      },
-      missing_ids: missingIds,
-    });
-  })
-);
-
-api.get(
-  "/trainers/:id/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const id = toInt(req.params.id);
-    if (!id) {
-      return res.status(404).json({ error: "Trainer not found." });
-    }
-
-    const trainer = await prisma.trainer.findUnique({
-      where: { id },
-      include: trainerIncludes,
-    });
-    if (!trainer) {
-      return res.status(404).json({ error: "Trainer not found." });
-    }
-
-    const [assignedTrainings, monthTrainings] = await Promise.all([
-      prisma.training.findMany({
-        where: { assignedTrainerId: trainer.id },
-        include: trainingIncludes,
-        orderBy: { startDatetime: "desc" },
-      }),
-      prisma.training.findMany({
-        where: {
-          assignedTrainerId: trainer.id,
-          status: { not: "canceled" },
-        },
-        select: {
-          startDatetime: true,
-          lat: true,
-          lng: true,
-        },
-      }),
-    ]);
-
-    const now = new Date();
-    const currentMonthTrainings = monthTrainings.filter(
-      (item) =>
-        item.startDatetime.getFullYear() === now.getFullYear() &&
-        item.startDatetime.getMonth() === now.getMonth()
-    );
-
-    let monthLongTrips = 0;
-    if (trainer.homeLat !== null && trainer.homeLng !== null) {
-      for (const item of currentMonthTrainings) {
-        if (item.lat === null || item.lng === null) {
-          continue;
-        }
-        const distance = haversineKm(item.lat, item.lng, trainer.homeLat, trainer.homeLng);
-        if (distance > LONG_TRIP_THRESHOLD_KM) {
-          monthLongTrips += 1;
-        }
-      }
-    }
-
-    return res.json({
-      item: trainerPayload(trainer, true),
-      assigned_trainings: assignedTrainings.map(trainingListItem),
-      month_workload: currentMonthTrainings.length,
-      month_long_trips: monthLongTrips,
-    });
-  })
-);
-
-api.put(
-  "/trainers/:id/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const id = toInt(req.params.id);
-    if (!id) {
-      return res.status(404).json({ error: "Trainer not found." });
-    }
-
-    const existing = await prisma.trainer.findUnique({ where: { id } });
-    if (!existing) {
-      return res.status(404).json({ error: "Trainer not found." });
-    }
-
-    const payload = req.body || {};
-    const errors = {};
-
-    const firstName = (payload.first_name || "").trim();
-    if (!firstName) {
-      addError(errors, "first_name", "This field is required.");
-    }
-    const lastName = (payload.last_name || "").trim();
-    if (!lastName) {
-      addError(errors, "last_name", "This field is required.");
-    }
-    const titlePrefix = (payload.title_prefix || "").trim();
-    const titleSuffix = (payload.title_suffix || "").trim();
-    const akris = parseBoolean(payload.akris);
-    if (akris === null) {
-      addError(errors, "akris", "Select a valid value.");
-    }
-    const callBeforeTraining = parseBoolean(payload.call_before_training);
-    if (callBeforeTraining === null) {
-      addError(errors, "call_before_training", "Select a valid value.");
-    }
-    const frequencyQuantity = (payload.frequency_quantity || "").trim() || null;
-    const frequencyPeriod = (payload.frequency_period || "").trim() || null;
-    const limitNote = (payload.limit_note || "").trim() || null;
-    const homeAddress = (payload.home_address || "").trim();
-    if (!homeAddress) {
-      addError(errors, "home_address", "This field is required.");
-    }
-
-    const email = payload.email || "";
-    if (email && !String(email).includes("@")) {
-      addError(errors, "email", "Enter a valid email address.");
-    }
-
-    const phone = payload.phone || "";
-    const homeLat = toNumber(payload.home_lat);
-    if (
-      payload.home_lat !== null &&
-      payload.home_lat !== undefined &&
-      payload.home_lat !== "" &&
-      homeLat === null
-    ) {
-      addError(errors, "home_lat", "Enter a valid latitude.");
-    }
-    const homeLng = toNumber(payload.home_lng);
-    if (
-      payload.home_lng !== null &&
-      payload.home_lng !== undefined &&
-      payload.home_lng !== "" &&
-      homeLng === null
-    ) {
-      addError(errors, "home_lng", "Enter a valid longitude.");
-    }
-
-    const hourlyRate = toNumber(payload.hourly_rate);
-    if (
-      payload.hourly_rate !== null &&
-      payload.hourly_rate !== undefined &&
-      payload.hourly_rate !== "" &&
-      hourlyRate === null
-    ) {
-      addError(errors, "hourly_rate", "Enter a valid number.");
-    }
-    const travelRateKm = toNumber(payload.travel_rate_km);
-    if (
-      payload.travel_rate_km !== null &&
-      payload.travel_rate_km !== undefined &&
-      payload.travel_rate_km !== "" &&
-      travelRateKm === null
-    ) {
-      addError(errors, "travel_rate_km", "Enter a valid number.");
-    }
-
-    const trainingTypes = Array.isArray(payload.training_types) ? payload.training_types : [];
-    const trainingTypeIds = trainingTypes
-      .map((value) => toInt(value))
-      .filter((value) => value !== null);
-
-    const maxDistance = toNumber(payload.max_distance_km);
-    if (
-      payload.max_distance_km !== null &&
-      payload.max_distance_km !== undefined &&
-      payload.max_distance_km !== "" &&
-      maxDistance === null
-    ) {
-      addError(errors, "max_distance_km", "Enter a valid number.");
-    } else if (maxDistance !== null && maxDistance < 1) {
-      addError(errors, "max_distance_km", "Ensure this value is greater than 0.");
-    }
-
-    const weekendAllowed =
-      payload.weekend_allowed === undefined
-        ? null
-        : parseBoolean(payload.weekend_allowed);
-    if (payload.weekend_allowed !== undefined && weekendAllowed === null) {
-      addError(errors, "weekend_allowed", "Select a valid value.");
-    }
-
-    const maxLongTrips = toNumber(payload.max_long_trips_per_month);
-    if (
-      payload.max_long_trips_per_month !== null &&
-      payload.max_long_trips_per_month !== undefined &&
-      payload.max_long_trips_per_month !== "" &&
-      maxLongTrips === null
-    ) {
-      addError(errors, "max_long_trips_per_month", "Enter a valid number.");
-    } else if (maxLongTrips !== null && maxLongTrips < 0) {
-      addError(errors, "max_long_trips_per_month", "Ensure this value is 0 or higher.");
-    }
-
-    const preferredWeekdays = Array.isArray(payload.preferred_weekdays)
-      ? payload.preferred_weekdays
-          .map((value) => toInt(value))
-          .filter((value) => value !== null && value >= 0 && value <= 6)
-      : [];
-
-    if (hasErrors(errors)) {
-      return res.status(400).json({ errors });
-    }
-
-    if (trainingTypeIds.length) {
-      const existingTypes = await prisma.trainingType.findMany({
-        where: { id: { in: trainingTypeIds } },
-        select: { id: true },
-      });
-      if (existingTypes.length !== trainingTypeIds.length) {
-        addError(errors, "training_types", "Select a valid training type.");
-      }
-    }
-
-    if (hasErrors(errors)) {
-      return res.status(400).json({ errors });
-    }
-
-    await prisma.trainer.update({
-      where: { id },
-      data: {
-        firstName,
-        lastName,
-        titlePrefix,
-        titleSuffix,
-        akris,
-        callBeforeTraining,
-        frequencyQuantity,
-        frequencyPeriod,
-        limitNote,
-        email,
-        phone,
-        homeAddress,
-        homeLat,
-        homeLng,
-        hourlyRate,
-        travelRateKm,
-        notes: payload.notes || "",
-      },
-    });
-
-    const ruleData = [
-      buildRuleData(id, "max_distance_km", maxDistance),
-      buildRuleData(id, "weekend_allowed", weekendAllowed),
-      buildRuleData(id, "max_long_trips_per_month", maxLongTrips),
-      buildRuleData(id, "preferred_weekdays", preferredWeekdays),
-    ].filter(Boolean);
-
-    await syncTrainerRelations(id, trainingTypeIds, ruleData);
-
-    const trainerFull = await prisma.trainer.findUnique({
-      where: { id },
-      include: trainerIncludes,
-    });
-
-    let updatedTrainer = trainerFull;
-    if (updatedTrainer.homeLat === null || updatedTrainer.homeLng === null) {
-      const geo = await geocodeAddress(updatedTrainer.homeAddress);
-      if (geo) {
-        updatedTrainer = await prisma.trainer.update({
-          where: { id: updatedTrainer.id },
-          data: { homeLat: geo.lat, homeLng: geo.lng },
-          include: trainerIncludes,
-        });
-      }
-    }
-
-    return res.json({ item: trainerPayload(updatedTrainer, true) });
   })
 );
 
@@ -2153,25 +682,29 @@ api.post(
   asyncHandler(async (req, res) => {
     const payload = req.body || {};
     const errors = {};
+
     const name = (payload.name || "").trim();
-    const teachingHoursValue = payload.teaching_hours;
-    const maxParticipantsValue = payload.max_participants;
-    const teachingHours = toNumber(teachingHoursValue);
-    const maxParticipants = toInt(maxParticipantsValue);
     if (!name) {
       addError(errors, "name", "This field is required.");
     }
-    if (teachingHoursValue !== undefined && teachingHoursValue !== "" && teachingHours === null) {
-      addError(errors, "teaching_hours", "Enter a valid number.");
+
+    const durationInput = payload.duration_minutes;
+    const teachingHoursInput = payload.teaching_hours;
+
+    const durationMinutes =
+      durationInput === undefined || durationInput === null || durationInput === ""
+        ? null
+        : toInt(durationInput);
+    const teachingHours =
+      teachingHoursInput === undefined || teachingHoursInput === null || teachingHoursInput === ""
+        ? null
+        : toNumber(teachingHoursInput);
+
+    if (durationInput !== undefined && durationInput !== "" && !durationMinutes) {
+      addError(errors, "duration_minutes", "Enter a valid duration in minutes.");
     }
-    if (teachingHours !== null && teachingHours < 0) {
-      addError(errors, "teaching_hours", "Enter a positive number.");
-    }
-    if (maxParticipantsValue !== undefined && maxParticipantsValue !== "" && maxParticipants === null) {
-      addError(errors, "max_participants", "Enter a valid number.");
-    }
-    if (maxParticipants !== null && maxParticipants < 0) {
-      addError(errors, "max_participants", "Enter a positive number.");
+    if (durationMinutes !== null && durationMinutes < 30) {
+      addError(errors, "duration_minutes", "Duration must be at least 30 minutes.");
     }
 
     if (hasErrors(errors)) {
@@ -2180,477 +713,20 @@ api.post(
 
     const existing = await prisma.trainingType.findUnique({ where: { name } });
     if (existing) {
-      return res.status(400).json({ errors: { name: [{ message: "Name must be unique." }] } });
-    }
-
-    const trainingType = await prisma.trainingType.create({
-      data: {
-        name,
-        teachingHours,
-        maxParticipants,
-      },
-    });
-    return res.status(201).json({ item: trainingTypePayload(trainingType) });
-  })
-);
-
-api.post(
-  "/training-types/import/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const csv = payload.csv;
-    if (!csv || typeof csv !== "string") {
-      return res.status(400).json({ error: "CSV obsah je povinný." });
-    }
-
-    const text = csv.charCodeAt(0) === 0xfeff ? csv.slice(1) : csv;
-    const firstLine = text.split(/\r?\n/, 1)[0] || "";
-    const delimiter = detectDelimiter(firstLine);
-    const rows = parseCsv(text, delimiter);
-    if (!rows.length) {
-      return res.status(400).json({ error: "CSV soubor je prázdný." });
-    }
-
-    const headers = rows[0].map((header) => String(header || "").trim());
-    const headerIndex = buildHeaderIndex(headers);
-    const requiredHeaders = ["lecture_name", "first_name", "last_name"];
-    const missingHeaders = requiredHeaders.filter((key) => headerIndex[key] === undefined);
-    if (missingHeaders.length) {
-      return res.status(400).json({
-        error: `Chybí povinné sloupce: ${missingHeaders.join(", ")}.`,
-      });
-    }
-
-    const dryRun = payload.dry_run === true;
-    const errors = [];
-    let imported = 0;
-    let skipped = 0;
-
-    const getValue = (row, key) => {
-      const idx = headerIndex[key];
-      if (idx === undefined) {
-        return "";
-      }
-      return row[idx] ?? "";
-    };
-
-    const trainingTypes = await prisma.trainingType.findMany();
-    const trainingTypeIndex = new Map(
-      trainingTypes.map((item) => [normalizeHeader(item.name), item])
-    );
-
-    const trainers = await prisma.trainer.findMany({
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        titlePrefix: true,
-        titleSuffix: true,
-      },
-    });
-
-    const normalizeNameParts = (parts) =>
-      normalizeHeader(
-        parts
-          .map((part) => String(part || "").trim())
-          .filter(Boolean)
-          .join(" ")
-      );
-
-    const addTrainerIndex = (map, key, trainer) => {
-      if (!key) {
-        return;
-      }
-      const existing = map.get(key) || [];
-      existing.push(trainer);
-      map.set(key, existing);
-    };
-
-    const trainerIndexFull = new Map();
-    const trainerIndexName = new Map();
-
-    trainers.forEach((trainer) => {
-      const firstName = trainer.firstName || "";
-      const lastName = trainer.lastName || "";
-      const titlePrefix = trainer.titlePrefix || "";
-      const titleSuffix = trainer.titleSuffix || "";
-      addTrainerIndex(trainerIndexName, normalizeNameParts([firstName, lastName]), trainer);
-      addTrainerIndex(
-        trainerIndexFull,
-        normalizeNameParts([titlePrefix, firstName, lastName, titleSuffix]),
-        trainer
-      );
-    });
-
-    const ensureTrainingType = async (name) => {
-      const key = normalizeHeader(name);
-      const existing = trainingTypeIndex.get(key);
-      if (existing) {
-        return existing;
-      }
-      if (dryRun) {
-        const placeholder = { id: null, name };
-        trainingTypeIndex.set(key, placeholder);
-        return placeholder;
-      }
-      const created = await prisma.trainingType.create({ data: { name } });
-      trainingTypeIndex.set(key, created);
-      return created;
-    };
-
-    for (let i = 1; i < rows.length; i += 1) {
-      const row = rows[i];
-      const rowNumber = i + 1;
-      if (!row || row.every((cell) => !String(cell || "").trim())) {
-        continue;
-      }
-
-      const rowErrors = [];
-      const lectureName = String(getValue(row, "lecture_name") || "").trim();
-      if (!lectureName) {
-        rowErrors.push({
-          field: "lecture_name",
-          message: "Název typu školení je povinný.",
-        });
-      }
-
-      const firstName = String(getValue(row, "first_name") || "").trim();
-      if (!firstName) {
-        rowErrors.push({ field: "first_name", message: "Jméno lektora je povinné." });
-      }
-
-      const lastName = String(getValue(row, "last_name") || "").trim();
-      if (!lastName) {
-        rowErrors.push({ field: "last_name", message: "Příjmení lektora je povinné." });
-      }
-
-      const titlePrefix = String(getValue(row, "title_prefix") || "").trim();
-      const titleSuffix = String(getValue(row, "title_suffix") || "").trim();
-
-      if (rowErrors.length) {
-        errors.push({ row: rowNumber, errors: rowErrors });
-        skipped += 1;
-        continue;
-      }
-
-      const trainingType = await ensureTrainingType(lectureName);
-
-      const fullKey = normalizeNameParts([titlePrefix, firstName, lastName, titleSuffix]);
-      const nameKey = normalizeNameParts([firstName, lastName]);
-      let matches = [];
-      if (titlePrefix || titleSuffix) {
-        matches = trainerIndexFull.get(fullKey) || [];
-      }
-      if (!matches.length) {
-        matches = trainerIndexName.get(nameKey) || [];
-      }
-
-      if (!matches.length) {
-        errors.push({
-          row: rowNumber,
-          errors: [{ field: "trainer", message: "Lektor nebyl nalezen." }],
-        });
-        skipped += 1;
-        continue;
-      }
-
-      if (matches.length > 1) {
-        errors.push({
-          row: rowNumber,
-          errors: [{ field: "trainer", message: "Nalezeno více lektorů se stejným jménem." }],
-        });
-        skipped += 1;
-        continue;
-      }
-
-      if (!dryRun && trainingType.id) {
-        await prisma.trainerSkill.upsert({
-          where: {
-            trainerId_trainingTypeId: {
-              trainerId: matches[0].id,
-              trainingTypeId: trainingType.id,
-            },
-          },
-          update: {},
-          create: {
-            trainerId: matches[0].id,
-            trainingTypeId: trainingType.id,
-          },
-        });
-      }
-
-      imported += 1;
-    }
-
-    return res.json({
-      dry_run: dryRun,
-      summary: {
-        total_rows: rows.length - 1,
-        imported,
-        skipped,
-        errors: errors.length,
-      },
-      errors,
-    });
-  })
-);
-
-api.post(
-  "/training-types/import-metrics/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const csv = payload.csv;
-    if (!csv || typeof csv !== "string") {
-      return res.status(400).json({ error: "CSV obsah je povinný." });
-    }
-
-    const text = csv.charCodeAt(0) === 0xfeff ? csv.slice(1) : csv;
-    const firstLine = text.split(/\r?\n/, 1)[0] || "";
-    const delimiter = detectDelimiter(firstLine);
-    const rows = parseCsv(text, delimiter);
-    if (!rows.length) {
-      return res.status(400).json({ error: "CSV soubor je prázdný." });
-    }
-
-    const headers = rows[0].map((header) => String(header || "").trim());
-    const headerIndex = buildHeaderIndex(headers);
-    const requiredHeaders = ["lecture_name"];
-    const missingHeaders = requiredHeaders.filter((key) => headerIndex[key] === undefined);
-    if (missingHeaders.length) {
-      return res.status(400).json({
-        error: `Chybí povinné sloupce: ${missingHeaders.join(", ")}.`,
-      });
-    }
-
-    const dryRun = payload.dry_run === true;
-    const errors = [];
-    let imported = 0;
-    let skipped = 0;
-
-    const getValue = (row, key) => {
-      const idx = headerIndex[key];
-      if (idx === undefined) {
-        return "";
-      }
-      return row[idx] ?? "";
-    };
-
-    const trainingTypes = await prisma.trainingType.findMany();
-    const trainingTypeIndex = new Map(
-      trainingTypes.map((item) => [normalizeHeader(item.name), item])
-    );
-
-    for (let i = 1; i < rows.length; i += 1) {
-      const row = rows[i];
-      const rowNumber = i + 1;
-      if (!row || row.every((cell) => !String(cell || "").trim())) {
-        continue;
-      }
-
-      const rowErrors = [];
-      const lectureName = String(getValue(row, "lecture_name") || "").trim();
-      if (!lectureName) {
-        rowErrors.push({
-          field: "lecture_name",
-          message: "Název typu školení je povinný.",
-        });
-      }
-
-      const hoursRaw = getValue(row, "hours");
-      const studentsRaw = getValue(row, "students");
-      const hours = parseCsvNumber(hoursRaw);
-      const students = parseCsvInteger(studentsRaw);
-      const hasHours = String(hoursRaw || "").trim() !== "";
-      const hasStudents = String(studentsRaw || "").trim() !== "";
-
-      if (hasHours && hours === null) {
-        rowErrors.push({ field: "hours", message: "Neplatný počet hodin." });
-      }
-      if (hasStudents && students === null) {
-        rowErrors.push({ field: "students", message: "Neplatný počet studentů." });
-      }
-      if (!hasHours && !hasStudents) {
-        rowErrors.push({
-          field: "hours",
-          message: "Vyplňte hours nebo students.",
-        });
-      }
-      if (hours !== null && hours < 0) {
-        rowErrors.push({ field: "hours", message: "Počet hodin musí být >= 0." });
-      }
-      if (students !== null && students < 0) {
-        rowErrors.push({ field: "students", message: "Počet studentů musí být >= 0." });
-      }
-
-      const trainingType = trainingTypeIndex.get(normalizeHeader(lectureName));
-      if (!trainingType) {
-        rowErrors.push({
-          field: "lecture_name",
-          message: "Typ školení nebyl nalezen.",
-        });
-      }
-
-      if (rowErrors.length) {
-        errors.push({ row: rowNumber, errors: rowErrors });
-        skipped += 1;
-        continue;
-      }
-
-      if (!dryRun && trainingType) {
-        const data = {};
-        if (hasHours) {
-          data.teachingHours = hours;
-        }
-        if (hasStudents) {
-          data.maxParticipants = students;
-        }
-        await prisma.trainingType.update({
-          where: { id: trainingType.id },
-          data,
-        });
-      }
-
-      imported += 1;
-    }
-
-    return res.json({
-      dry_run: dryRun,
-      summary: {
-        total_rows: rows.length - 1,
-        imported,
-        skipped,
-        errors: errors.length,
-      },
-      errors,
-    });
-  })
-);
-
-api.post(
-  "/training-types/bulk-delete/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const ids = Array.isArray(payload.ids) ? payload.ids : [];
-    if (!ids.length) {
-      return res.status(400).json({ error: "Seznam ID je povinný." });
-    }
-
-    const parsedIds = [];
-    const invalidIds = [];
-    ids.forEach((value) => {
-      const parsed = toInt(value);
-      if (!parsed) {
-        invalidIds.push(value);
-      } else {
-        parsedIds.push(parsed);
-      }
-    });
-
-    if (invalidIds.length) {
-      return res.status(400).json({ error: "Neplatná ID typů školení." });
-    }
-
-    const uniqueIds = Array.from(new Set(parsedIds));
-    const existing = await prisma.trainingType.findMany({
-      where: { id: { in: uniqueIds } },
-      select: { id: true },
-    });
-    const existingIds = new Set(existing.map((item) => item.id));
-    const missingIds = uniqueIds.filter((id) => !existingIds.has(id));
-
-    const usedTrainings = await prisma.training.findMany({
-      where: { trainingTypeId: { in: Array.from(existingIds) } },
-      select: { trainingTypeId: true },
-    });
-    const blockedIds = Array.from(
-      new Set(usedTrainings.map((item) => item.trainingTypeId))
-    );
-    const blockedSet = new Set(blockedIds);
-    const deletableIds = Array.from(existingIds).filter((id) => !blockedSet.has(id));
-
-    let deletedCount = 0;
-    if (deletableIds.length) {
-      const result = await prisma.trainingType.deleteMany({
-        where: { id: { in: deletableIds } },
-      });
-      deletedCount = result.count;
-    }
-
-    return res.json({
-      summary: {
-        requested: uniqueIds.length,
-        deleted: deletedCount,
-        blocked: blockedIds.length,
-        missing: missingIds.length,
-      },
-      blocked_ids: blockedIds,
-      missing_ids: missingIds,
-    });
-  })
-);
-
-api.put(
-  "/training-types/:id/",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const id = toInt(req.params.id);
-    if (!id) {
-      return res.status(404).json({ error: "Training type not found." });
-    }
-
-    const trainingType = await prisma.trainingType.findUnique({ where: { id } });
-    if (!trainingType) {
-      return res.status(404).json({ error: "Training type not found." });
-    }
-
-    const payload = req.body || {};
-    const errors = {};
-    const name = (payload.name || "").trim();
-    const teachingHoursValue = payload.teaching_hours;
-    const maxParticipantsValue = payload.max_participants;
-    const teachingHours =
-      teachingHoursValue === undefined ? trainingType.teachingHours : toNumber(teachingHoursValue);
-    const maxParticipants =
-      maxParticipantsValue === undefined
-        ? trainingType.maxParticipants
-        : toInt(maxParticipantsValue);
-    if (!name) {
-      addError(errors, "name", "This field is required.");
-    }
-    if (teachingHoursValue !== undefined && teachingHoursValue !== "" && teachingHours === null) {
-      addError(errors, "teaching_hours", "Enter a valid number.");
-    }
-    if (teachingHours !== null && teachingHours < 0) {
-      addError(errors, "teaching_hours", "Enter a positive number.");
-    }
-    if (maxParticipantsValue !== undefined && maxParticipantsValue !== "" && maxParticipants === null) {
-      addError(errors, "max_participants", "Enter a valid number.");
-    }
-    if (maxParticipants !== null && maxParticipants < 0) {
-      addError(errors, "max_participants", "Enter a positive number.");
-    }
-
-    const existing = await prisma.trainingType.findUnique({ where: { name } });
-    if (existing && existing.id !== id) {
       addError(errors, "name", "Name must be unique.");
-    }
-
-    if (hasErrors(errors)) {
       return res.status(400).json({ errors });
     }
 
-    const updatedType = await prisma.trainingType.update({
-      where: { id },
+    const created = await prisma.trainingType.create({
       data: {
         name,
-        teachingHours,
-        maxParticipants,
+        durationMinutes: durationMinutes || 240,
+        teachingHours: teachingHours ?? (durationMinutes ? durationMinutes / 60 : null),
       },
     });
-    return res.json({ item: trainingTypePayload(updatedType) });
+
+    broadcastEvent("invalidate", { entity: "training_type", id: created.id });
+    res.status(201).json({ item: trainingTypePayload(created) });
   })
 );
 
@@ -2675,10 +751,83 @@ api.get(
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     });
 
-    return res.json({
+    res.json({
       item: trainingTypePayload(trainingType),
       trainers: trainers.map(trainerSummary),
     });
+  })
+);
+
+api.put(
+  "/training-types/:id/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = toInt(req.params.id);
+    if (!id) {
+      return res.status(404).json({ error: "Training type not found." });
+    }
+
+    const existingType = await prisma.trainingType.findUnique({ where: { id } });
+    if (!existingType) {
+      return res.status(404).json({ error: "Training type not found." });
+    }
+
+    const payload = req.body || {};
+    const errors = {};
+    const name = (payload.name || "").trim();
+    if (!name) {
+      addError(errors, "name", "This field is required.");
+    }
+
+    const durationMinutes =
+      payload.duration_minutes === undefined || payload.duration_minutes === null || payload.duration_minutes === ""
+        ? existingType.durationMinutes
+        : toInt(payload.duration_minutes);
+
+    if (payload.duration_minutes !== undefined && payload.duration_minutes !== "" && !durationMinutes) {
+      addError(errors, "duration_minutes", "Enter a valid duration in minutes.");
+    }
+    if (durationMinutes !== null && durationMinutes < 30) {
+      addError(errors, "duration_minutes", "Duration must be at least 30 minutes.");
+    }
+
+    const teachingHours =
+      payload.teaching_hours === undefined || payload.teaching_hours === null || payload.teaching_hours === ""
+        ? existingType.teachingHours
+        : toNumber(payload.teaching_hours);
+    const maxParticipants =
+      payload.max_participants === undefined || payload.max_participants === null || payload.max_participants === ""
+        ? existingType.maxParticipants
+        : toInt(payload.max_participants);
+
+    if (payload.teaching_hours !== undefined && payload.teaching_hours !== "" && teachingHours === null) {
+      addError(errors, "teaching_hours", "Enter a valid number.");
+    }
+    if (payload.max_participants !== undefined && payload.max_participants !== "" && maxParticipants === null) {
+      addError(errors, "max_participants", "Enter a valid number.");
+    }
+
+    const sameName = await prisma.trainingType.findUnique({ where: { name } });
+    if (sameName && sameName.id !== id) {
+      addError(errors, "name", "Name must be unique.");
+    }
+
+    if (hasErrors(errors)) {
+      return res.status(400).json({ errors });
+    }
+
+    const updated = await prisma.trainingType.update({
+      where: { id },
+      data: {
+        name,
+        durationMinutes,
+        teachingHours,
+        maxParticipants,
+      },
+    });
+
+    broadcastEvent("invalidate", { entity: "training_type", id: updated.id });
+    res.json({ item: trainingTypePayload(updated) });
   })
 );
 
@@ -2700,11 +849,986 @@ api.delete(
     if (linkedTrainings > 0) {
       return res
         .status(400)
-        .json({ error: "Training type is used by trainings and cannot be deleted." });
+        .json({ error: "Training type is used by requests and cannot be deleted." });
     }
 
     await prisma.trainingType.delete({ where: { id } });
-    return res.json({ ok: true });
+    broadcastEvent("invalidate", { entity: "training_type", id });
+    res.json({ ok: true });
+  })
+);
+
+api.get(
+  "/trainers/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const limit = clampPageLimit(req.query.limit);
+    const cursorId = decodeCursor(req.query.cursor);
+    if (req.query.cursor && !cursorId) {
+      return res.status(400).json({ error: "Invalid cursor." });
+    }
+
+    const trainersPage = await prisma.trainer.findMany({
+      where: cursorId ? { id: { lt: cursorId } } : undefined,
+      orderBy: [{ id: "desc" }],
+      take: limit + 1,
+    });
+    const totalCount = await prisma.trainer.count();
+
+    if (!trainersPage.length) {
+      return res.json({ items: [], next_cursor: null });
+    }
+    const hasMore = trainersPage.length > limit;
+    const trainers = hasMore ? trainersPage.slice(0, limit) : trainersPage;
+
+    const trainerIds = trainers.map((trainer) => trainer.id);
+    const now = new Date();
+
+    const [trainingCounts, upcomingTrainings] = await Promise.all([
+      prisma.training.groupBy({
+        by: ["assignedTrainerId"],
+        where: {
+          assignedTrainerId: { in: trainerIds },
+          status: { in: ["assigned", "confirmed"] },
+        },
+        _count: { _all: true },
+      }),
+      prisma.training.findMany({
+        where: {
+          assignedTrainerId: { in: trainerIds },
+          status: { in: ["assigned", "confirmed"] },
+          startDatetime: { gte: now },
+        },
+        include: listIncludes,
+        orderBy: { startDatetime: "asc" },
+      }),
+    ]);
+
+    const countsByTrainer = trainingCounts.reduce((acc, item) => {
+      if (item.assignedTrainerId) {
+        acc[item.assignedTrainerId] = item._count._all;
+      }
+      return acc;
+    }, {});
+
+    const nextTrainingByTrainer = upcomingTrainings.reduce((acc, training) => {
+      if (training.assignedTrainerId && !acc[training.assignedTrainerId]) {
+        acc[training.assignedTrainerId] = training;
+      }
+      return acc;
+    }, {});
+
+    const items = trainers.map((trainer) => {
+      const payload = trainerPayload(trainer, false);
+      payload.assigned_trainings_count = countsByTrainer[trainer.id] || 0;
+      payload.next_assigned_training = nextTrainingByTrainer[trainer.id]
+        ? trainingListItem(nextTrainingByTrainer[trainer.id])
+        : null;
+      return payload;
+    });
+
+    const nextCursor =
+      hasMore && trainers.length ? encodeCursor(trainers[trainers.length - 1].id) : null;
+    res.json({ items, next_cursor: nextCursor, total_count: totalCount });
+  })
+);
+
+api.post(
+  "/trainers/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const errors = {};
+
+    const firstName = (payload.first_name || "").trim();
+    if (!firstName) {
+      addError(errors, "first_name", "This field is required.");
+    }
+    const lastName = (payload.last_name || "").trim();
+    if (!lastName) {
+      addError(errors, "last_name", "This field is required.");
+    }
+
+    const homeAddress = (payload.home_address || "").trim();
+    if (!homeAddress) {
+      addError(errors, "home_address", "This field is required.");
+    }
+
+    const email = (payload.email || "").trim();
+    if (email && !email.includes("@")) {
+      addError(errors, "email", "Enter a valid email address.");
+    }
+
+    const homeLat = toNumber(payload.home_lat);
+    if (payload.home_lat !== undefined && payload.home_lat !== "" && homeLat === null) {
+      addError(errors, "home_lat", "Enter a valid latitude.");
+    }
+    const homeLng = toNumber(payload.home_lng);
+    if (payload.home_lng !== undefined && payload.home_lng !== "" && homeLng === null) {
+      addError(errors, "home_lng", "Enter a valid longitude.");
+    }
+
+    const trainingTypeIds = Array.isArray(payload.training_types)
+      ? payload.training_types.map((value) => toInt(value)).filter(Boolean)
+      : [];
+
+    const slots = normalizeSlotPayload(payload.availability_slots, errors);
+
+    if (hasErrors(errors)) {
+      return res.status(400).json({ errors });
+    }
+
+    const created = await prisma.$transaction(async (tx) => {
+      const trainer = await tx.trainer.create({
+        data: {
+          firstName,
+          lastName,
+          titlePrefix: (payload.title_prefix || "").trim() || null,
+          titleSuffix: (payload.title_suffix || "").trim() || null,
+          email: email || null,
+          phone: (payload.phone || "").trim() || null,
+          homeAddress,
+          homeLat,
+          homeLng,
+          notes: (payload.notes || "").trim() || null,
+          akris: parseBoolean(payload.akris) ?? false,
+          callBeforeTraining: parseBoolean(payload.call_before_training) ?? false,
+          frequencyQuantity: (payload.frequency_quantity || "").trim() || null,
+          frequencyPeriod: (payload.frequency_period || "").trim() || null,
+          limitNote: (payload.limit_note || "").trim() || null,
+          hourlyRate: toNumber(payload.hourly_rate),
+          travelRateKm: toNumber(payload.travel_rate_km),
+        },
+      });
+
+      if (trainingTypeIds.length) {
+        await ensureTrainerSkills(tx, trainer.id, Array.from(new Set(trainingTypeIds)));
+      }
+
+      await replaceTrainerAvailabilitySlots(tx, trainer.id, slots);
+
+      return tx.trainer.findUnique({
+        where: { id: trainer.id },
+        include: trainerIncludes,
+      });
+    });
+
+    let resolved = created;
+    if ((created.homeLat === null || created.homeLng === null) && created.homeAddress) {
+      const geo = await geocodeAddress(created.homeAddress);
+      if (geo) {
+        resolved = await prisma.trainer.update({
+          where: { id: created.id },
+          data: { homeLat: geo.lat, homeLng: geo.lng },
+          include: trainerIncludes,
+        });
+      }
+    }
+
+    broadcastEvent("invalidate", { entity: "trainer", id: resolved.id });
+    res.status(201).json({ item: trainerPayload(resolved, true) });
+  })
+);
+
+api.get(
+  "/trainers/:id/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = toInt(req.params.id);
+    if (!id) {
+      return res.status(404).json({ error: "Trainer not found." });
+    }
+
+    const trainer = await prisma.trainer.findUnique({
+      where: { id },
+      include: trainerIncludes,
+    });
+    if (!trainer) {
+      return res.status(404).json({ error: "Trainer not found." });
+    }
+
+    const assignedTrainings = await prisma.training.findMany({
+      where: {
+        assignedTrainerId: id,
+        status: { in: ["assigned", "confirmed"] },
+      },
+      include: listIncludes,
+      orderBy: { startDatetime: "desc" },
+      take: 100,
+    });
+
+    const fairness = await fairnessForTrainerInMonth(id, new Date());
+
+    res.json({
+      item: trainerPayload(trainer, true),
+      assigned_trainings: assignedTrainings.map(trainingListItem),
+      fairness_current_month: fairnessPayload(fairness),
+    });
+  })
+);
+
+api.put(
+  "/trainers/:id/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = toInt(req.params.id);
+    if (!id) {
+      return res.status(404).json({ error: "Trainer not found." });
+    }
+
+    const existing = await prisma.trainer.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: "Trainer not found." });
+    }
+
+    const payload = req.body || {};
+    const errors = {};
+    if (!payload.updated_at) {
+      addError(errors, "updated_at", "Missing concurrency token.");
+    } else if (!ensureNotStale(existing.updatedAt, payload.updated_at)) {
+      return res.status(409).json({
+        error: "Trainer was updated by another user. Reload and try again.",
+        stale: true,
+      });
+    }
+
+    const firstName = (payload.first_name || "").trim();
+    if (!firstName) {
+      addError(errors, "first_name", "This field is required.");
+    }
+    const lastName = (payload.last_name || "").trim();
+    if (!lastName) {
+      addError(errors, "last_name", "This field is required.");
+    }
+    const homeAddress = (payload.home_address || "").trim();
+    if (!homeAddress) {
+      addError(errors, "home_address", "This field is required.");
+    }
+
+    const email = (payload.email || "").trim();
+    if (email && !email.includes("@")) {
+      addError(errors, "email", "Enter a valid email address.");
+    }
+
+    const homeLat = toNumber(payload.home_lat);
+    if (payload.home_lat !== undefined && payload.home_lat !== "" && homeLat === null) {
+      addError(errors, "home_lat", "Enter a valid latitude.");
+    }
+    const homeLng = toNumber(payload.home_lng);
+    if (payload.home_lng !== undefined && payload.home_lng !== "" && homeLng === null) {
+      addError(errors, "home_lng", "Enter a valid longitude.");
+    }
+
+    const trainingTypeIds = Array.isArray(payload.training_types)
+      ? payload.training_types.map((value) => toInt(value)).filter(Boolean)
+      : [];
+
+    const slots = normalizeSlotPayload(payload.availability_slots, errors);
+
+    if (hasErrors(errors)) {
+      return res.status(400).json({ errors });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.trainer.update({
+        where: { id },
+        data: {
+          firstName,
+          lastName,
+          titlePrefix: (payload.title_prefix || "").trim() || null,
+          titleSuffix: (payload.title_suffix || "").trim() || null,
+          email: email || null,
+          phone: (payload.phone || "").trim() || null,
+          homeAddress,
+          homeLat,
+          homeLng,
+          notes: (payload.notes || "").trim() || null,
+          akris: parseBoolean(payload.akris) ?? existing.akris,
+          callBeforeTraining:
+            parseBoolean(payload.call_before_training) ?? existing.callBeforeTraining,
+          frequencyQuantity: (payload.frequency_quantity || "").trim() || null,
+          frequencyPeriod: (payload.frequency_period || "").trim() || null,
+          limitNote: (payload.limit_note || "").trim() || null,
+          hourlyRate: toNumber(payload.hourly_rate),
+          travelRateKm: toNumber(payload.travel_rate_km),
+        },
+      });
+
+      await ensureTrainerSkills(tx, id, Array.from(new Set(trainingTypeIds)));
+      await replaceTrainerAvailabilitySlots(tx, id, slots);
+
+      return tx.trainer.findUnique({ where: { id }, include: trainerIncludes });
+    });
+
+    let resolved = updated;
+    if ((resolved.homeLat === null || resolved.homeLng === null) && resolved.homeAddress) {
+      const geo = await geocodeAddress(resolved.homeAddress);
+      if (geo) {
+        resolved = await prisma.trainer.update({
+          where: { id },
+          data: { homeLat: geo.lat, homeLng: geo.lng },
+          include: trainerIncludes,
+        });
+      }
+    }
+
+    broadcastEvent("invalidate", { entity: "trainer", id });
+    res.json({ item: trainerPayload(resolved, true) });
+  })
+);
+
+api.post(
+  "/trainers/bulk-delete/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const ids = Array.isArray(payload.ids) ? payload.ids : [];
+    if (!ids.length) {
+      return res.status(400).json({ error: "Seznam ID je povinný." });
+    }
+
+    const parsedIds = ids.map((value) => toInt(value)).filter(Boolean);
+    if (!parsedIds.length) {
+      return res.status(400).json({ error: "Neplatná ID trenérů." });
+    }
+
+    const uniqueIds = Array.from(new Set(parsedIds));
+
+    await prisma.$transaction(async (tx) => {
+      await tx.trainerAvailabilitySlot.deleteMany({
+        where: {
+          trainerId: { in: uniqueIds },
+          assignedTrainingId: null,
+        },
+      });
+      await tx.training.updateMany({
+        where: { assignedTrainerId: { in: uniqueIds } },
+        data: {
+          assignedTrainerId: null,
+          status: "open",
+        },
+      });
+      await tx.trainer.deleteMany({ where: { id: { in: uniqueIds } } });
+    });
+
+    broadcastEvent("invalidate", { entity: "trainer" });
+    broadcastEvent("invalidate", { entity: "training" });
+    res.json({ ok: true });
+  })
+);
+
+api.get(
+  "/trainings/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const limit = clampPageLimit(req.query.limit);
+    const cursorId = decodeCursor(req.query.cursor);
+    if (req.query.cursor && !cursorId) {
+      return res.status(400).json({ error: "Invalid cursor." });
+    }
+
+    const filters = [];
+    const status = normalizeStatus(req.query.status, "");
+    if (status) {
+      filters.push({ status });
+    }
+
+    const trainingTypeId = toInt(req.query.training_type);
+    if (trainingTypeId) {
+      filters.push({ trainingTypeId });
+    }
+
+    const startDate = parseDateOnly(req.query.start_date);
+    const endDate = parseDateOnly(req.query.end_date);
+
+    if (startDate) {
+      filters.push({
+        OR: [
+          { requestWindowEnd: { gte: startOfDay(startDate) } },
+          { requestWindowEnd: null, startDatetime: { gte: startOfDay(startDate) } },
+        ],
+      });
+    }
+
+    if (endDate) {
+      filters.push({
+        OR: [
+          { requestWindowStart: { lte: endOfDay(endDate) } },
+          { requestWindowStart: null, startDatetime: { lte: endOfDay(endDate) } },
+        ],
+      });
+    }
+
+    if (req.query.no_trainer) {
+      filters.push({
+        assignedTrainerId: null,
+        status: { in: ["draft", "open"] },
+      });
+    }
+
+    const baseWhere = filters.length ? { AND: filters } : undefined;
+    const where =
+      cursorId && baseWhere
+        ? { AND: [baseWhere, { id: { lt: cursorId } }] }
+        : cursorId
+          ? { id: { lt: cursorId } }
+          : baseWhere;
+
+    const [trainings, totalCount] = await Promise.all([
+      prisma.training.findMany({
+        where,
+        include: listIncludes,
+        orderBy: [{ id: "desc" }],
+        take: limit + 1,
+      }),
+      prisma.training.count({ where: baseWhere }),
+    ]);
+
+    const hasMore = trainings.length > limit;
+    const page = hasMore ? trainings.slice(0, limit) : trainings;
+    const nextCursor = hasMore && page.length ? encodeCursor(page[page.length - 1].id) : null;
+    res.json({
+      items: page.map(trainingListItem),
+      next_cursor: nextCursor,
+      total_count: totalCount,
+    });
+  })
+);
+
+api.post(
+  "/trainings/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const errors = {};
+
+    const trainingTypeId = toInt(payload.training_type);
+    if (!trainingTypeId) {
+      addError(errors, "training_type", "This field is required.");
+    }
+
+    const address = (payload.address || "").trim();
+    if (!address) {
+      addError(errors, "address", "This field is required.");
+    }
+
+    const { windowStart, windowEnd } = parseWindowRange(payload, errors);
+
+    const status = normalizeStatus(payload.status, "open");
+    if (!VALID_STATUSES.has(status)) {
+      addError(errors, "status", "Select a valid status.");
+    }
+    if (status === "assigned" || status === "confirmed") {
+      addError(errors, "status", "Use assignment action to set assigned/confirmed.");
+    }
+
+    const lat = toNumber(payload.lat);
+    if (payload.lat !== undefined && payload.lat !== "" && lat === null) {
+      addError(errors, "lat", "Enter a valid latitude.");
+    }
+
+    const lng = toNumber(payload.lng);
+    if (payload.lng !== undefined && payload.lng !== "" && lng === null) {
+      addError(errors, "lng", "Enter a valid longitude.");
+    }
+
+    if (hasErrors(errors)) {
+      return res.status(400).json({ errors });
+    }
+
+    const trainingType = await prisma.trainingType.findUnique({ where: { id: trainingTypeId } });
+    if (!trainingType) {
+      addError(errors, "training_type", "Select a valid training type.");
+      return res.status(400).json({ errors });
+    }
+
+    let resolvedLat = lat;
+    let resolvedLng = lng;
+    if (resolvedLat === null || resolvedLng === null) {
+      const geo = await geocodeAddress(address);
+      if (geo) {
+        resolvedLat = geo.lat;
+        resolvedLng = geo.lng;
+      }
+    }
+
+    const fallback = fallbackAssignmentTime(windowStart, trainingType);
+    const created = await prisma.training.create({
+      data: {
+        trainingTypeId,
+        customerName: (payload.customer_name || "").trim() || null,
+        address,
+        lat: resolvedLat,
+        lng: resolvedLng,
+        requestWindowStart: windowStart,
+        requestWindowEnd: windowEnd,
+        startDatetime: fallback.start,
+        endDatetime: fallback.end,
+        status,
+        assignmentReason: (payload.assignment_reason || "").trim() || null,
+        notes: (payload.notes || "").trim() || null,
+        changedBy: req.session.user.username,
+      },
+      include: listIncludes,
+    });
+
+    broadcastEvent("invalidate", { entity: "training", id: created.id });
+    res.status(201).json({ item: trainingPayload(created, null) });
+  })
+);
+
+api.get(
+  "/trainings/:id/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = toInt(req.params.id);
+    if (!id) {
+      return res.status(404).json({ error: "Training request not found." });
+    }
+
+    const training = await prisma.training.findUnique({
+      where: { id },
+      include: listIncludes,
+    });
+    if (!training) {
+      return res.status(404).json({ error: "Training request not found." });
+    }
+
+    const assignedSlot = await prisma.trainerAvailabilitySlot.findFirst({
+      where: { assignedTrainingId: id },
+    });
+
+    const recommendations =
+      training.status === "canceled"
+        ? []
+        : await recommendationsForTraining({
+            ...training,
+            status: normalizeStatus(training.status, "open"),
+          });
+
+    res.json({
+      item: trainingPayload(training, assignedSlot),
+      recommendations: {
+        matches: recommendations,
+        generated_at: new Date().toISOString(),
+      },
+    });
+  })
+);
+
+api.put(
+  "/trainings/:id/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = toInt(req.params.id);
+    if (!id) {
+      return res.status(404).json({ error: "Training request not found." });
+    }
+
+    const existing = await prisma.training.findUnique({
+      where: { id },
+      include: { trainingType: true },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: "Training request not found." });
+    }
+
+    const payload = req.body || {};
+    const errors = {};
+    if (!payload.updated_at) {
+      addError(errors, "updated_at", "Missing concurrency token.");
+    } else if (!ensureNotStale(existing.updatedAt, payload.updated_at)) {
+      return res.status(409).json({
+        error: "Request was updated by another user. Reload and try again.",
+        stale: true,
+      });
+    }
+
+    const trainingTypeId = toInt(payload.training_type);
+    if (!trainingTypeId) {
+      addError(errors, "training_type", "This field is required.");
+    }
+
+    const address = (payload.address || "").trim();
+    if (!address) {
+      addError(errors, "address", "This field is required.");
+    }
+
+    const { windowStart, windowEnd } = parseWindowRange(payload, errors);
+
+    const status = normalizeStatus(payload.status, existing.status);
+    if (!VALID_STATUSES.has(status)) {
+      addError(errors, "status", "Select a valid status.");
+    }
+
+    if (hasErrors(errors)) {
+      return res.status(400).json({ errors });
+    }
+
+    const trainingType = await prisma.trainingType.findUnique({ where: { id: trainingTypeId } });
+    if (!trainingType) {
+      addError(errors, "training_type", "Select a valid training type.");
+      return res.status(400).json({ errors });
+    }
+
+    const assignedSlot = await prisma.trainerAvailabilitySlot.findFirst({
+      where: { assignedTrainingId: id },
+    });
+
+    if ((status === "assigned" || status === "confirmed") && !assignedSlot) {
+      addError(errors, "status", "Assigned/confirmed status requires an assigned slot.");
+      return res.status(400).json({ errors });
+    }
+
+    let resolvedLat = toNumber(payload.lat);
+    let resolvedLng = toNumber(payload.lng);
+    if (resolvedLat === null || resolvedLng === null) {
+      const geo = await geocodeAddress(address);
+      if (geo) {
+        resolvedLat = geo.lat;
+        resolvedLng = geo.lng;
+      }
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if ((status === "draft" || status === "open" || status === "canceled") && assignedSlot) {
+        await tx.trainerAvailabilitySlot.update({
+          where: { id: assignedSlot.id },
+          data: { assignedTrainingId: null },
+        });
+      }
+
+      let startDatetime = existing.startDatetime;
+      let endDatetime = existing.endDatetime;
+      let assignedTrainerId = existing.assignedTrainerId;
+      if (status === "draft" || status === "open" || status === "canceled") {
+        const fallback = fallbackAssignmentTime(windowStart, trainingType);
+        startDatetime = fallback.start;
+        endDatetime = fallback.end;
+        assignedTrainerId = null;
+      }
+
+      return tx.training.update({
+        where: { id },
+        data: {
+          trainingTypeId,
+          customerName: (payload.customer_name || "").trim() || null,
+          address,
+          lat: resolvedLat,
+          lng: resolvedLng,
+          requestWindowStart: windowStart,
+          requestWindowEnd: windowEnd,
+          startDatetime,
+          endDatetime,
+          status,
+          assignedTrainerId,
+          assignmentReason: (payload.assignment_reason || "").trim() || null,
+          notes: (payload.notes || "").trim() || null,
+          changedBy: req.session.user.username,
+        },
+        include: listIncludes,
+      });
+    });
+
+    const refreshedSlot = await prisma.trainerAvailabilitySlot.findFirst({
+      where: { assignedTrainingId: id },
+    });
+
+    broadcastEvent("invalidate", { entity: "training", id });
+    res.json({ item: trainingPayload(updated, refreshedSlot) });
+  })
+);
+
+api.patch(
+  "/trainings/:id/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = toInt(req.params.id);
+    if (!id) {
+      return res.status(404).json({ error: "Training request not found." });
+    }
+
+    const existing = await prisma.training.findUnique({
+      where: { id },
+      include: { trainingType: true },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: "Training request not found." });
+    }
+
+    const payload = req.body || {};
+    if (!payload.updated_at) {
+      return res.status(400).json({
+        errors: { updated_at: [{ message: "Missing concurrency token." }] },
+      });
+    }
+    if (!ensureNotStale(existing.updatedAt, payload.updated_at)) {
+      return res.status(409).json({
+        error: "Request was updated by another user. Reload and try again.",
+        stale: true,
+      });
+    }
+
+    const nextStatus =
+      payload.status === undefined ? existing.status : normalizeStatus(payload.status, existing.status);
+
+    if (!VALID_STATUSES.has(nextStatus)) {
+      return res.status(400).json({ errors: { status: [{ message: "Select a valid status." }] } });
+    }
+
+    const assignedSlot = await prisma.trainerAvailabilitySlot.findFirst({
+      where: { assignedTrainingId: id },
+    });
+
+    if ((nextStatus === "assigned" || nextStatus === "confirmed") && !assignedSlot) {
+      return res.status(400).json({
+        errors: { status: [{ message: "Assigned/confirmed status requires an assigned slot." }] },
+      });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (nextStatus === "draft" || nextStatus === "open" || nextStatus === "canceled") {
+        if (assignedSlot) {
+          return releaseTrainingSlot(
+            tx,
+            existing,
+            existing.trainingType,
+            nextStatus,
+            req.session.user.username
+          );
+        }
+        const fallback = fallbackAssignmentTime(
+          existing.requestWindowStart || existing.startDatetime,
+          existing.trainingType
+        );
+        return tx.training.update({
+          where: { id },
+          data: {
+            status: nextStatus,
+            assignedTrainerId: null,
+            startDatetime: fallback.start,
+            endDatetime: fallback.end,
+            customerName:
+              payload.customer_name === undefined
+                ? existing.customerName
+                : (payload.customer_name || "").trim() || null,
+            assignmentReason:
+              payload.assignment_reason === undefined
+                ? existing.assignmentReason
+                : (payload.assignment_reason || "").trim() || null,
+            notes:
+              payload.notes === undefined ? existing.notes : (payload.notes || "").trim() || null,
+            changedBy: req.session.user.username,
+          },
+          include: listIncludes,
+        });
+      }
+
+      return tx.training.update({
+        where: { id },
+        data: {
+          status: nextStatus,
+          customerName:
+            payload.customer_name === undefined
+              ? existing.customerName
+              : (payload.customer_name || "").trim() || null,
+          assignmentReason:
+            payload.assignment_reason === undefined
+              ? existing.assignmentReason
+              : (payload.assignment_reason || "").trim() || null,
+          notes: payload.notes === undefined ? existing.notes : (payload.notes || "").trim() || null,
+          changedBy: req.session.user.username,
+        },
+        include: listIncludes,
+      });
+    });
+
+    const refreshedSlot = await prisma.trainerAvailabilitySlot.findFirst({
+      where: { assignedTrainingId: id },
+    });
+
+    broadcastEvent("invalidate", { entity: "training", id });
+    res.json({ item: trainingPayload(updated, refreshedSlot) });
+  })
+);
+
+api.post(
+  "/trainings/:id/assign/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const id = toInt(req.params.id);
+    if (!id) {
+      return res.status(404).json({ error: "Training request not found." });
+    }
+
+    const payload = req.body || {};
+    const slotId = toInt(payload.slot_id);
+    if (!slotId) {
+      return res.status(400).json({ errors: { slot_id: [{ message: "Select a valid slot." }] } });
+    }
+    if (!payload.updated_at) {
+      return res.status(400).json({ errors: { updated_at: [{ message: "Missing concurrency token." }] } });
+    }
+
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const training = await tx.training.findUnique({
+          where: { id },
+          include: { trainingType: true, assignedTrainer: true },
+        });
+        if (!training) {
+          throw Object.assign(new Error("not-found"), { code: "NOT_FOUND" });
+        }
+        if (!ensureNotStale(training.updatedAt, payload.updated_at)) {
+          throw Object.assign(new Error("stale"), { code: "STALE" });
+        }
+        if (training.status === "canceled") {
+          throw Object.assign(new Error("canceled"), { code: "CANCELED" });
+        }
+
+        const slot = await tx.trainerAvailabilitySlot.findUnique({
+          where: { id: slotId },
+          include: {
+            trainer: { include: { skills: true } },
+          },
+        });
+        if (!slot) {
+          throw Object.assign(new Error("slot-not-found"), { code: "SLOT_NOT_FOUND" });
+        }
+        if (!slot.isActive) {
+          throw Object.assign(new Error("slot-inactive"), { code: "SLOT_INACTIVE" });
+        }
+
+        const windowStart = training.requestWindowStart || training.startDatetime;
+        const windowEnd = training.requestWindowEnd || training.endDatetime;
+        if (slot.startDatetime < windowStart || slot.endDatetime > windowEnd) {
+          throw Object.assign(new Error("slot-outside-window"), { code: "SLOT_OUTSIDE_WINDOW" });
+        }
+
+        const requiredDurationMs = durationMinutesForType(training.trainingType) * 60000;
+        if (slot.endDatetime.getTime() - slot.startDatetime.getTime() < requiredDurationMs) {
+          throw Object.assign(new Error("slot-too-short"), { code: "SLOT_TOO_SHORT" });
+        }
+
+        const skillIds = new Set((slot.trainer.skills || []).map((skill) => skill.trainingTypeId));
+        if (!skillIds.has(training.trainingTypeId)) {
+          throw Object.assign(new Error("topic-mismatch"), { code: "TOPIC_MISMATCH" });
+        }
+
+        const currentSlot = await tx.trainerAvailabilitySlot.findFirst({
+          where: { assignedTrainingId: id },
+        });
+
+        if (currentSlot && currentSlot.id !== slot.id) {
+          await tx.trainerAvailabilitySlot.update({
+            where: { id: currentSlot.id },
+            data: { assignedTrainingId: null },
+          });
+        }
+
+        if (slot.assignedTrainingId && slot.assignedTrainingId !== id) {
+          throw Object.assign(new Error("slot-taken"), { code: "SLOT_TAKEN" });
+        }
+
+        if (slot.assignedTrainingId !== id) {
+          const claim = await tx.trainerAvailabilitySlot.updateMany({
+            where: {
+              id: slot.id,
+              assignedTrainingId: null,
+              isActive: true,
+            },
+            data: {
+              assignedTrainingId: id,
+            },
+          });
+
+          if (!claim.count) {
+            throw Object.assign(new Error("slot-taken"), { code: "SLOT_TAKEN" });
+          }
+        }
+
+        const assignmentReason =
+          (payload.assignment_reason || "").trim() ||
+          "Přiřazeno podle dostupného slotu, tématu a fairness skóre.";
+
+        const updatedTraining = await tx.training.update({
+          where: { id },
+          data: {
+            assignedTrainerId: slot.trainerId,
+            startDatetime: slot.startDatetime,
+            endDatetime: slot.endDatetime,
+            status: payload.confirmed ? "confirmed" : "assigned",
+            assignmentReason,
+            changedBy: req.session.user.username,
+          },
+          include: listIncludes,
+        });
+
+        return { updatedTraining, slotId: slot.id };
+      });
+
+      const assignedSlot = await prisma.trainerAvailabilitySlot.findFirst({
+        where: { assignedTrainingId: id },
+      });
+
+      broadcastEvent("invalidate", { entity: "training", id });
+      res.json({ item: trainingPayload(result.updatedTraining, assignedSlot) });
+    } catch (err) {
+      if (err.code === "NOT_FOUND") {
+        return res.status(404).json({ error: "Training request not found." });
+      }
+      if (err.code === "CANCELED") {
+        return res.status(400).json({ error: "Canceled request cannot be assigned." });
+      }
+      if (err.code === "STALE") {
+        return res.status(409).json({
+          error: "Request was updated by another user. Reload and try again.",
+          stale: true,
+        });
+      }
+      if (err.code === "SLOT_NOT_FOUND") {
+        return res.status(404).json({ error: "Slot not found." });
+      }
+      if (err.code === "SLOT_TAKEN") {
+        return res.status(409).json({
+          error: "Slot was already taken. Refresh candidates and choose another slot.",
+        });
+      }
+      if (
+        err.code === "TOPIC_MISMATCH" ||
+        err.code === "SLOT_TOO_SHORT" ||
+        err.code === "SLOT_OUTSIDE_WINDOW" ||
+        err.code === "SLOT_INACTIVE"
+      ) {
+        return res.status(400).json({ error: "Selected slot is no longer valid for this request." });
+      }
+      throw err;
+    }
+  })
+);
+
+api.post(
+  "/trainings/bulk-delete/",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const payload = req.body || {};
+    const ids = Array.isArray(payload.ids) ? payload.ids.map((value) => toInt(value)).filter(Boolean) : [];
+    if (!ids.length) {
+      return res.status(400).json({ error: "Seznam ID je povinný." });
+    }
+
+    const uniqueIds = Array.from(new Set(ids));
+
+    await prisma.$transaction(async (tx) => {
+      await tx.trainerAvailabilitySlot.updateMany({
+        where: { assignedTrainingId: { in: uniqueIds } },
+        data: { assignedTrainingId: null },
+      });
+      await tx.training.deleteMany({ where: { id: { in: uniqueIds } } });
+    });
+
+    broadcastEvent("invalidate", { entity: "training" });
+    res.json({ ok: true });
   })
 );
 
@@ -2727,18 +1851,18 @@ api.get(
           lte: monthEnd,
         },
       },
-      include: trainingIncludes,
+      include: listIncludes,
       orderBy: { startDatetime: "asc" },
     });
 
     const trainingsByDay = {};
-    for (const training of trainings) {
+    trainings.forEach((training) => {
       const key = formatDate(training.startDatetime);
       if (!trainingsByDay[key]) {
         trainingsByDay[key] = [];
       }
       trainingsByDay[key].push(training);
-    }
+    });
 
     const start = startOfWeekMonday(monthStart);
     const end = startOfWeekMonday(monthEnd);
@@ -2752,7 +1876,7 @@ api.get(
     const weeks = [];
     for (let i = 0; i < monthDays.length; i += 7) {
       const week = [];
-      for (const day of monthDays.slice(i, i + 7)) {
+      monthDays.slice(i, i + 7).forEach((day) => {
         const key = formatDate(day);
         week.push({
           date: key,
@@ -2767,7 +1891,7 @@ api.get(
             address: item.address,
           })),
         });
-      }
+      });
       weeks.push(week);
     }
 
@@ -2789,7 +1913,7 @@ api.get(
       timeZone: config.timeZone,
     }).format(new Date(year, safeMonth - 1, 1));
 
-    return res.json({
+    res.json({
       month: safeMonth,
       year,
       month_name: monthName,
@@ -2820,18 +1944,18 @@ api.get(
           lte: endOfDay(weekEnd),
         },
       },
-      include: trainingIncludes,
+      include: listIncludes,
       orderBy: { startDatetime: "asc" },
     });
 
     const trainingsByDay = {};
-    for (const training of trainings) {
+    trainings.forEach((training) => {
       const key = formatDate(training.startDatetime);
       if (!trainingsByDay[key]) {
         trainingsByDay[key] = [];
       }
       trainingsByDay[key].push(training);
-    }
+    });
 
     const days = [];
     for (let offset = 0; offset < 7; offset += 1) {
@@ -2863,7 +1987,7 @@ api.get(
     const nextDate = new Date(weekStart);
     nextDate.setDate(nextDate.getDate() + 7);
 
-    return res.json({
+    res.json({
       week_start: formatDate(weekStart),
       days,
       prev_date: formatDate(prevDate),
@@ -2903,3 +2027,9 @@ const shutdown = async () => {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+module.exports = {
+  app,
+  server,
+  shutdown,
+};

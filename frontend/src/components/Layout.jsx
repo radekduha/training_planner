@@ -4,9 +4,9 @@ import { requestJson } from "../api/client.js";
 
 const navItems = [
   { to: "/", label: "Přehled" },
-  { to: "/trainings", label: "Školení" },
+  { to: "/trainings", label: "Poptávky" },
   { to: "/trainers", label: "Trenéři" },
-  { to: "/training-types", label: "Typy školení" },
+  { to: "/training-types", label: "Témata" },
 ];
 
 const CalendarIcon = () => (
@@ -21,7 +21,7 @@ const CalendarIcon = () => (
 const utilityItems = [{ to: "/calendar", label: "Kalendář", icon: CalendarIcon }];
 
 const actionItems = [
-  { to: "/trainings/new", label: "Vytvořit školení" },
+  { to: "/trainings/new", label: "Nová poptávka" },
   { to: "/trainers/new", label: "Vytvořit trenéra" },
 ];
 
@@ -45,7 +45,7 @@ const Layout = () => {
           <div className="brand-mark">TP</div>
           <div>
             <div className="brand-title">Training Planner</div>
-            <div className="brand-subtitle">Rychlé plánování po celé České republice</div>
+            <div className="brand-subtitle">Availability-first plánování poptávek a slotů</div>
           </div>
         </div>
         <nav className="app-nav">

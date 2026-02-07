@@ -1,108 +1,64 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { fetchTrainer } from "../api/trainers.js";
 import PageHeader from "../components/PageHeader.jsx";
+import useRealtimeInvalidate from "../hooks/useRealtimeInvalidate.js";
 
-const weekdayLabels = [
-  "Pondělí",
-  "Úterý",
-  "Středa",
-  "Čtvrtek",
-  "Pátek",
-  "Sobota",
-  "Neděle",
-];
-const weekdayOptions = weekdayLabels.map((label, value) => ({ value, label }));
-
-const formatCzk = (value) => {
-  if (value === null || value === undefined || value === "") {
+const formatDateTime = (value) => {
+  if (!value) {
     return "--";
   }
-  return `${value} Kč`;
+  return new Date(value).toLocaleString("cs-CZ", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 };
 
-const formatCzkPerKm = (value) => {
-  if (value === null || value === undefined || value === "") {
-    return "--";
-  }
-  return `${value} Kč / km`;
-};
-
-const normalizeWeekdayValues = (value) => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const normalized = value
-    .map((day) => Number(day))
-    .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6);
-  return Array.from(new Set(normalized)).sort((a, b) => a - b);
-};
-
-const formatRuleValue = (value) => {
-  if (value === null || value === undefined || value === "") {
-    return "--";
-  }
-  return String(value);
-};
-
-const getRuleDisplay = (rule) => {
-  if (rule.type === "max_distance_km") {
-    return { label: "Maximální vzdálenost", value: rule.value, unit: "km" };
-  }
-  if (rule.type === "max_long_trips_per_month") {
-    return { label: "Max. počet dlouhých cest za měsíc", value: rule.value, unit: "cest" };
-  }
-  return { label: rule.label, value: rule.value, unit: "" };
-};
-
-const renderRuleMetric = (rule) => {
-  const { label, value, unit } = getRuleDisplay(rule);
-  const displayValue = formatRuleValue(value);
-  const showUnit = unit && displayValue !== "--";
-  return (
-    <div className="rule-metric">
-      <span className="rule-label">{label}</span>
-      <span className="rule-value">
-        {displayValue}
-        {showUnit ? <span className="rule-unit">{unit}</span> : null}
-      </span>
-    </div>
-  );
-};
-
-const normalizeWeekendAllowed = (value) => {
-  if (value === true || value === "true") {
-    return true;
-  }
-  if (value === false || value === "false") {
-    return false;
-  }
-  return null;
-};
+const percent = (value) => `${Math.round((value || 0) * 1000) / 10} %`;
 
 const TrainerDetail = () => {
   const { id } = useParams();
   const [trainer, setTrainer] = useState(null);
   const [assignedTrainings, setAssignedTrainings] = useState([]);
-  const [workload, setWorkload] = useState({ month_workload: 0, month_long_trips: 0 });
+  const [fairness, setFairness] = useState({
+    offered_days: 0,
+    delivered_days: 0,
+    target_share: 0,
+    actual_share: 0,
+    deviation_ratio: 0,
+    within_tolerance: true,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
+  const loadTrainer = useCallback(async () => {
     setLoading(true);
-    fetchTrainer(id)
-      .then((data) => {
-        setTrainer(data.item);
-        setAssignedTrainings(data.assigned_trainings || []);
-        setWorkload({
-          month_workload: data.month_workload || 0,
-          month_long_trips: data.month_long_trips || 0,
-        });
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+    setError(null);
+    try {
+      const data = await fetchTrainer(id);
+      setTrainer(data.item);
+      setAssignedTrainings(data.assigned_trainings || []);
+      setFairness(data.fairness_current_month || {});
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
+
+  useEffect(() => {
+    loadTrainer();
+  }, [loadTrainer]);
+
+  useRealtimeInvalidate(
+    useCallback(() => {
+      loadTrainer();
+    }, [loadTrainer])
+  );
 
   if (loading) {
     return (
@@ -130,25 +86,6 @@ const TrainerDetail = () => {
     return null;
   }
 
-  const preferredWeekdaysRule = trainer.rules?.find(
-    (rule) => rule.type === "preferred_weekdays"
-  );
-  const preferredWeekdays = normalizeWeekdayValues(preferredWeekdaysRule?.value);
-  const preferredWeekdaysSet = new Set(preferredWeekdays);
-  const weekendAllowedRule = trainer.rules?.find((rule) => rule.type === "weekend_allowed");
-  const weekendAllowed = normalizeWeekendAllowed(weekendAllowedRule?.value);
-  const otherRules =
-    trainer.rules?.filter(
-      (rule) => rule.type !== "preferred_weekdays" && rule.type !== "weekend_allowed"
-    ) || [];
-  const weekendLabel =
-    weekendAllowed === null ? "--" : weekendAllowed ? "Povoleno" : "Nepovoleno";
-  const weekendClass =
-    weekendAllowed === null
-      ? "status-pill"
-      : weekendAllowed
-        ? "status-pill positive"
-        : "status-pill negative";
   const displayName =
     trainer.display_name ||
     [trainer.title_prefix, trainer.first_name, trainer.last_name, trainer.title_suffix]
@@ -156,159 +93,45 @@ const TrainerDetail = () => {
       .join(" ")
       .trim() ||
     trainer.name;
-  const ruleSections = [
-    {
-      key: "weekend",
-      content: (
-        <div className="rule-status">
-          <span className="detail-label">Víkendy povoleny</span>
-          <span className={weekendClass}>{weekendLabel}</span>
-        </div>
-      ),
-    },
-    {
-      key: "weekdays",
-      content: (
-        <>
-          <p className="detail-label">Preferované dny v týdnu</p>
-          <div className="weekday-grid compact">
-            {weekdayOptions.map((day) => {
-              const isPreferred = preferredWeekdaysSet.has(day.value);
-              return (
-                <div
-                  key={day.value}
-                  className={`weekday-item${isPreferred ? " active" : ""}`}
-                >
-                  <span className="weekday-check" aria-hidden="true">
-                    {isPreferred ? "✓" : ""}
-                  </span>
-                  <span>{day.label}</span>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      ),
-    },
-    ...otherRules.map((rule) => ({
-      key: rule.type,
-      content: renderRuleMetric(rule),
-    })),
-  ];
 
   return (
     <section className="stack trainer-detail">
       <PageHeader
         title={displayName}
-        subtitle="Profil trenéra a aktuální vytížení."
+        subtitle="Dovednosti, sloty dostupnosti a měsíční fairness."
         actions={
           <Link className="btn btn-ghost" to={`/trainers/${trainer.id}/edit`}>
             Upravit trenéra
           </Link>
         }
       />
-      <div className="grid trainer-detail-grid">
+
+      <div className="grid two">
         <div className="stack">
           <div className="card">
             <h3>Profil</h3>
             <div className="detail-list">
-              <div className="detail-item">
-                <span className="detail-label">Jméno</span>
-                <strong className="detail-value">{trainer.first_name || "--"}</strong>
+              <div>
+                <span className="muted">E-mail</span>
+                <strong>{trainer.email || "--"}</strong>
               </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">Příjmení</span>
-                <strong className="detail-value">{trainer.last_name || "--"}</strong>
+              <div>
+                <span className="muted">Telefon</span>
+                <strong>{trainer.phone || "--"}</strong>
               </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">Titul před jménem</span>
-                <strong className="detail-value">{trainer.title_prefix || "--"}</strong>
+              <div>
+                <span className="muted">Adresa</span>
+                <strong>{trainer.home_address || "--"}</strong>
               </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">Titul za jménem</span>
-                <strong className="detail-value">{trainer.title_suffix || "--"}</strong>
-              </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">AKRIS</span>
-                <strong className="detail-value">{trainer.akris ? "Ano" : "Ne"}</strong>
-              </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">Zavolat před školením</span>
-                <strong className="detail-value">
-                  {trainer.call_before_training ? "Ano" : "Ne"}
-                </strong>
-              </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">Frekvence - hodnota</span>
-                <strong className="detail-value">{trainer.frequency_quantity || "--"}</strong>
-              </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">Frekvence - jednotka</span>
-                <strong className="detail-value">{trainer.frequency_period || "--"}</strong>
-              </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">E-mail</span>
-                <strong className="detail-value">{trainer.email || "--"}</strong>
-              </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">Telefon</span>
-                <strong className="detail-value">{trainer.phone || "--"}</strong>
-              </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">Bydliště</span>
-                <strong className="detail-value">{trainer.home_address}</strong>
+              <div>
+                <span className="muted">Poznámky</span>
+                <strong>{trainer.notes || "--"}</strong>
               </div>
             </div>
           </div>
+
           <div className="card">
-            <h3>Ceník</h3>
-            <div className="detail-list two-column">
-              <div className="detail-item">
-                <span className="detail-label">Hodinová sazba</span>
-                <strong className="detail-value">{formatCzk(trainer.hourly_rate)}</strong>
-              </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">Cestovné</span>
-                <strong className="detail-value">
-                  {formatCzkPerKm(trainer.travel_rate_km)}
-                </strong>
-              </div>
-            </div>
-          </div>
-          <div className="card">
-            <h3>Poznámky a vytížení</h3>
-            <div className="detail-list">
-              <div className="detail-item">
-                <span className="detail-label">Poznámka k limitu</span>
-                <strong className="detail-value">{trainer.limit_note || "--"}</strong>
-              </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">Poznámky</span>
-                <strong className="detail-value">{trainer.notes || "--"}</strong>
-              </div>
-              <div className="detail-divider" role="presentation" />
-              <div className="detail-item">
-                <span className="detail-label">Vytížení tento měsíc</span>
-                <strong className="detail-value">
-                  {workload.month_workload} školení, {workload.month_long_trips} dlouhých cest
-                </strong>
-              </div>
-            </div>
-          </div>
-          <div className="card">
-            <h3>Typy školení</h3>
+            <h3>Témata</h3>
             <div className="pill-row">
               {trainer.training_types?.length ? (
                 trainer.training_types.map((type) => (
@@ -317,56 +140,110 @@ const TrainerDetail = () => {
                   </span>
                 ))
               ) : (
-                <p className="muted">Žádné typy školení nejsou přiřazeny.</p>
+                <p className="muted">Žádné téma není přiřazené.</p>
               )}
             </div>
           </div>
+
           <div className="card">
-            <h3>Pravidla</h3>
-            <div className="rules-stack">
-              {ruleSections.map((section, index) => (
-                <div key={section.key} className="rule-section">
-                  {section.content}
-                  {index < ruleSections.length - 1 ? (
-                    <div className="rule-divider" role="presentation" />
-                  ) : null}
-                </div>
-              ))}
+            <h3>Fairness tento měsíc</h3>
+            <div className="detail-list">
+              <div>
+                <span className="muted">Offered days</span>
+                <strong>{fairness.offered_days ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Delivered days</span>
+                <strong>{fairness.delivered_days ?? 0}</strong>
+              </div>
+              <div>
+                <span className="muted">Cílový podíl</span>
+                <strong>{percent(fairness.target_share)}</strong>
+              </div>
+              <div>
+                <span className="muted">Skutečný podíl</span>
+                <strong>{percent(fairness.actual_share)}</strong>
+              </div>
+              <div>
+                <span className="muted">Odchylka</span>
+                <strong>{Math.round((fairness.deviation_ratio || 0) * 100)} %</strong>
+              </div>
+              <div>
+                <span className="muted">Tolerance 20 %</span>
+                <strong>{fairness.within_tolerance ? "V toleranci" : "Mimo toleranci"}</strong>
+              </div>
             </div>
           </div>
         </div>
-        <div className="card">
-          <h3>Přiřazená školení</h3>
-          {assignedTrainings.length ? (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Školení</th>
-                    <th>Datum</th>
-                    <th>Stav</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {assignedTrainings.map((training) => (
-                    <tr key={training.id}>
-                      <td>
-                        <Link className="text-link" to={`/trainings/${training.id}`}>
-                          {training.training_type?.name}
-                        </Link>
-                      </td>
-                      <td>{new Date(training.start_datetime).toLocaleString()}</td>
-                      <td>
-                        <span className="pill">{training.status_label}</span>
-                      </td>
+
+        <div className="stack">
+          <div className="card">
+            <h3>Dostupné sloty</h3>
+            {trainer.availability_slots?.length ? (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Od</th>
+                      <th>Do</th>
+                      <th>Stav</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="muted">Zatím žádná přiřazená školení.</p>
-          )}
+                  </thead>
+                  <tbody>
+                    {trainer.availability_slots.map((slot) => (
+                      <tr key={slot.id}>
+                        <td>{formatDateTime(slot.start_datetime)}</td>
+                        <td>{formatDateTime(slot.end_datetime)}</td>
+                        <td>
+                          {slot.assigned_training_id
+                            ? `Rezervováno (poptávka #${slot.assigned_training_id})`
+                            : slot.is_active
+                              ? "Volné"
+                              : "Neaktivní"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="muted">Zatím nejsou zadané žádné sloty.</p>
+            )}
+          </div>
+
+          <div className="card">
+            <h3>Přiřazené poptávky</h3>
+            {assignedTrainings.length ? (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Poptávka</th>
+                      <th>Termín</th>
+                      <th>Stav</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assignedTrainings.map((training) => (
+                      <tr key={training.id}>
+                        <td>
+                          <Link className="text-link" to={`/trainings/${training.id}`}>
+                            {training.training_type?.name || `Poptávka #${training.id}`}
+                          </Link>
+                        </td>
+                        <td>{formatDateTime(training.assigned_start_datetime)}</td>
+                        <td>
+                          <span className="pill">{training.status_label}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="muted">Zatím žádné přiřazené poptávky.</p>
+            )}
+          </div>
         </div>
       </div>
     </section>

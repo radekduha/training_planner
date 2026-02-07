@@ -1,337 +1,257 @@
-## **1️⃣ Context and problem**
+## 1) Context and Problem
 
-The project owner organizes trainings across the whole Czech Republic and works with approximately **50 external trainers**.
+The organizing company runs classroom trainings and works with multiple external trainers.
+A small internal planning team (up to 3 people) assigns trainers to incoming training requests.
 
-Each trainer has their own conditions:
+The planning problem is availability-first:
 
-- maximum distance they are willing to travel
-- willingness to train on weekends
-- frequency of long trips
-- price
-- time availability
+- organizations request a training topic and a preferred time window,
+- trainers provide exact available calendar slots for upcoming periods,
+- planners must quickly select the best trainer and slot.
 
-Today, everything is planned **manually** (phone, email, Excel, notes). This is:
+Today, planning is mostly manual (messages, spreadsheets, notes), which is:
 
-- time‑consuming
-- error‑prone
-- hard to scale at around 100 trainings per month
-- mentally exhausting (constant checking of details)
+- slow,
+- error-prone,
+- hard to coordinate across 2-3 planners,
+- difficult to keep fair across trainers.
 
-**Business pain:** the owner spends too much time on complex manual decision‑making instead of focusing on developing the project.
+Business pain:
 
----
-
-## **2️⃣ Product goal (business-wise)**
-
-Create a **simple internal web application** that:
-
-- shortens the time to find a suitable trainer to **≤ 2 minutes**,
-- reduces the amount of manual checking of conditions (distance, weekend, workload),
-- provides a **clear recommendation** ("why this trainer specifically"),
-- centralizes information into a single tool (no more spreadsheets + notes + separate calendar).
-
-The application is meant to help **a single user (the owner)** make **quick and safe decisions** about staffing trainings.
+- too much time spent searching and double-checking availability,
+- uneven trainer utilization,
+- weak traceability of why a trainer was selected.
 
 ---
 
-## **3️⃣ Success metrics**
+## 2) Product Goal (Business)
 
-- **Tactical metric:**
-    - finding a usable trainer within **≤ 2 minutes** from creating the training
-- **Operational metrics:**
-    - most trainings are staffed without needing to open Excel or other notes
-    - the owner subjectively evaluates planning as "clear and calm" (e.g. NPS question once per quarter)
-- **Qualitative:**
-    - the decision "why this trainer" is understandable even several months later
+Build a simple internal web app that:
 
----
-
-## **4️⃣ Key design principles**
-
-The application should be:
-
-- **Easy to use** – a single primary flow "plan training → select trainer".
-- **Clear** – minimum number of screens, clear status of each training.
-- **Predictable** – clear rules, no "magical" behavior.
-- **Maintainable** – simple data model, no unnecessary integrations in the MVP.
-- **Extensible** – ready for Google Calendar and other small improvements without needing to rewrite the core.
+- finds a suitable trainer and concrete slot within 2 minutes,
+- matches requests by topic and real slot availability,
+- balances trainer utilization proportionally to trainer-provided capacity,
+- gives transparent ranking with a match percentage and explanation,
+- synchronizes assignment changes in real time for all internal planners.
 
 ---
 
-## **5️⃣ User scenarios (user flows)**
+## 3) Success Metrics
 
-### **5.1 Creating and staffing a new training**
-
-1. The user clicks **"New training"**.
-2. Fills in:
-    - training type
-    - address (free text)
-    - date and time (from–to)
-3. Saves. Status is automatically set to **"waiting for trainer"**.
-4. The system offers a **sorted list of recommended trainers**.
-5. The user:
-    - selects a trainer
-    - optionally adjusts details
-    - saves → status changes to **"assigned"** or **"confirmed"** (depending on agreement with the trainer outside the system).
-
-### **5.2 Editing or canceling a training**
-
-1. The user opens a training from the list or from the calendar.
-2. They can:
-    - edit time / address
-    - change the trainer (run recommendations again)
-    - mark the training as **"canceled"** (status "canceled" is added as an extra status and **is not counted** towards workload).
-
-### **5.3 Adding a new trainer**
-
-1. The user clicks **"New trainer"**.
-2. Fills in:
-    - name, contact details
-    - home address (free text)
-    - training types
-    - price
-    - conditions (max. km, weekend yes/no, limit of long trips)
-3. On save, the address is geocoded and distance is used during recommendations.
+- Tactical metric:
+  - planner can assign a trainer+slot within <= 2 minutes for standard requests.
+- Operational metrics:
+  - most assignments are done without external spreadsheets/notes,
+  - no duplicate assignment caused by concurrent edits,
+  - monthly utilization per trainer stays within configured fairness tolerance where feasible.
+- Qualitative:
+  - decision rationale remains understandable months later.
 
 ---
 
-## **6️⃣ Training state model**
+## 4) Key Principles
 
-An extended state model for a **simple and readable workflow**:
-
-- **draft** – training in progress, trainer search has not started yet
-- **waiting for trainer** – training is ready, but no trainer is selected yet
-- **assigned** – trainer selected internally, but not yet finally confirmed (confirmation happens outside the system)
-- **confirmed** – trainer confirmed, the training will take place
-- **canceled** – training canceled (is not counted towards workload nor long trips)
-
-**Transition rules (simplified):**
-
-- draft → waiting for trainer (user marks training as ready)
-- waiting for trainer → assigned (user selects a trainer in the application)
-- assigned → confirmed (confirmation with the trainer happens outside the system, the user only switches the status)
-- anything → canceled (if the event is canceled)
-
-This model is simple but reflects reality and is easily understandable even in retrospect.
+- Availability-first: no assignment without a real free slot.
+- Predictable matching: explicit hard filters and transparent scoring.
+- Fair-by-design: monthly workload balancing uses proportional target shares.
+- Low-friction operations: optimized for small internal team collaboration.
+- Real-time consistency: planners immediately see changes made by others.
 
 ---
 
-## **7️⃣ Functional scope of MVP (in scope)**
+## 5) Core User Flows
 
-### **7.1 Trainer records**
+### 5.1 Create request and assign trainer
 
-**Each trainer:**
+1. Planner creates a new request.
+2. Planner fills:
+   - training topic,
+   - location (onsite),
+   - preferred time window (optional).
+3. If window is empty, system defaults it to next 30 days from creation date.
+4. System uses fixed duration from selected topic.
+5. System returns ranked trainer+slot candidates.
+6. Planner selects one candidate and saves.
+7. Slot becomes assigned immediately (no temporary hold).
+8. Change is pushed in real time to other planners.
 
-- name and contact details
-- home address (free text)
-- training types taught
-- price per training (one selected model, e.g. price per day)
-- notes
+### 5.2 Edit or cancel assignment
 
-**Trainer conditions (rules):**
+1. Planner opens request detail.
+2. Planner can:
+   - change topic/window/location,
+   - rerun matching,
+   - reassign trainer+slot,
+   - cancel request.
+3. If canceled, previously assigned slot is released.
 
-- maximum distance (km)
-- trains / does not train on weekends
-- maximum number of "long trips" per month (e.g. over 150 km)
-- (optionally) preferred days of the week
+### 5.3 Maintain trainer supply calendars
 
----
-
-### **7.2 Training records**
-
-**Each training:**
-
-- training type
-- address (free text)
-- date and time (from–to)
-- status (see model above)
-- assigned trainer (optional)
-- internal notes
-- (prepared) `google_event_id`
-
----
-
-### **7.3 Matching and trainer recommendations (core functionality)**
-
-### **Step 1 – hard filtering (hard constraints)**
-
-Exclude trainers who:
-
-- do not teach the given training type
-- have a collision in the calendar (time conflict)
-- do not train on weekends (if the training is on a weekend)
-- exceed the maximum allowed distance
-
-**Edge behavior:**
-
-- if no trainer meets all hard conditions:
-    - the system displays the message "No one meets all conditions"
-    - at the same time it offers the **closest possible candidates** who break at most **one** condition (e.g. slightly over the km limit), clearly marked as ⚠️ a compromise.
-
-### **Step 2 – scoring (soft constraints)**
-
-The remaining trainers (or the selected "compromise" group) receive a score based on:
-
-- distance (shorter = better)
-- number of trainings in the given month (fewer = better distribution)
-- price (cheaper = better, but not at the cost of extreme distances)
-- number of long trips in the month (fewer long trips = better)
-
-**Default logic (described in words, not exact weights):**
-
-- primarily we prefer **reasonable distance**
-- secondarily **balanced workload** (do not overload one person)
-- price is a **third factor**, so the system does not always pick the cheapest trainer
-- long trips are limited based on trainer rules
-
-**Output:**
-
-- sorted list of trainers
-- for each trainer:
-    - price
-    - distance
-    - workload in the month (number of trainings + long trips)
-    - short explanation ("Why recommended" / "What to watch out for")
+1. Planner or admin enters trainer profile.
+2. Planner sets:
+   - trainer topics (can teach / cannot teach),
+   - exact availability slots in calendar.
+3. System uses those slots as source of truth for matching.
 
 ---
 
-## **8️⃣ Overviews and navigation**
+## 6) State Model
 
-### **8.1 Training list**
+- draft: request being prepared.
+- open: request ready for matching, no trainer assigned.
+- assigned: trainer and exact slot assigned.
+- confirmed: assignment confirmed for delivery.
+- canceled: request canceled.
 
-- basic tabular overview of trainings
-- filters:
-    - date (from–to)
-    - status
-    - training type
-- quick filter: **"without trainer"** (draft + waiting for trainer)
+Transition rules:
 
-### **8.2 Calendar view**
-
-- simple **monthly view** as default
-- option to switch to **weekly** (if needed)
-- clicking a training opens a detail where the user can:
-    - change status
-    - select a trainer again
-
-### **8.3 Trainer detail**
-
-- basic data and conditions
-- training history (list of past and future trainings)
-- quick overview of workload in the current month
+- draft -> open
+- open -> assigned
+- assigned -> confirmed
+- assigned -> open (reassignment)
+- any -> canceled
 
 ---
 
-## **9️⃣ Addresses and distances**
+## 7) Functional Scope (MVP)
 
-- address entered as **free text**
-- on save it is **geocoded** to lat/lng
-- distance is calculated **as the crow flies (Haversine)**
-- road distances and map APIs are **not part of the MVP**
+### 7.1 Trainer records
 
-UX simplifications:
+Each trainer has:
 
-- no live maps in the MVP
-- no complex address validation – if geocoding fails, show a simple message and let the user correct the address.
+- identity and contacts,
+- topics they can deliver (boolean mapping),
+- exact availability slots (datetime start/end),
+- optional notes.
 
----
+### 7.2 Topic catalog
 
-## **🔟 Non‑functional requirements**
+Each topic defines:
 
-- web application (responsive for desktop and mobile)
-- access for a single user only (no need to resolve roles)
-- low operating costs (hosting in the order of a few hundred CZK per month)
-- automatic data backups (handled at hosting / DB level)
-- simple extensibility (clean data model, no hard‑coupling to integrations)
+- topic name,
+- fixed training duration.
 
----
+### 7.3 Request records
 
-## **1️⃣1️⃣ Audit and history (lightweight)**
+Each request has:
 
-Even though there is only one user:
+- requested topic,
+- onsite location,
+- preferred time window (from/to, optional),
+- system default window (next 30 days when missing),
+- status,
+- assigned trainer (optional),
+- assigned slot (optional),
+- internal notes.
 
-- for trainings and trainers, store:
-    - creation date (`created_at`)
-    - last update date (`updated_at`)
+### 7.4 Matching engine (core)
 
-A full audit log is not necessary, but these fields **improve traceability** without complicating development.
+Step 1: hard filters
 
----
+Exclude candidates where:
 
-## **1️⃣2️⃣ Google Calendar (out of scope, but prepared)**
+- trainer cannot teach topic,
+- no free slot of required duration inside request window,
+- trainer slot already assigned.
 
-- the trainings table contains a `google_event_id` field
+Step 2: candidate generation
 
-**MVP:**
+- produce trainer+slot pairs that satisfy hard filters,
+- include nearest fitting slots first (earlier slots preferred by default).
 
-- own internal calendar
+Step 3: fairness scoring (monthly)
 
-**V2+:**
+For each trainer in current month:
 
-- one‑way synchronization of **confirmed trainings** → Google Calendar
-- 1 shared calendar (owner’s)
+- offered_days: number of available training days provided by trainer,
+- delivered_days: number of assigned/confirmed training days,
+- target_share = offered_days / total_offered_days,
+- actual_share = delivered_days / total_delivered_days,
+- fairness_gap = actual_share - target_share.
 
----
+Fairness policy:
 
-## **1️⃣3️⃣ Explicitly out of MVP scope**
+- preferred is fairness_gap close to 0,
+- underutilized trainers (negative gap) get better score,
+- tolerance band is +/-20% against target share.
 
-- substitute trainer
-- automatic trainer confirmations
-- notifications to trainers
-- advanced workflows for cancelations / rescheduling
-- AI / machine learning
-- complex pricing (combination of multiple price models at once)
+Step 4: match percentage and ranking
 
----
+- each candidate gets `match_percent` (0-100),
+- output includes:
+  - trainer,
+  - concrete slot,
+  - match_percent,
+  - short explanation (for example: "topic fit, slot in window, under target share by 12%"),
+- ranking prioritizes:
+  1. hard fit completeness,
+  2. fairness,
+  3. slot suitability in requested window.
 
-## **1️⃣4️⃣ Data model (MVP)**
+### 7.5 Real-time collaboration and consistency
 
-The basic data model remains simple:
+- up to 3 internal planners can work concurrently,
+- all assignment changes are broadcast in real time,
+- assignment save uses atomic conflict check:
+  - "slot still free" must pass at commit time,
+  - if failed, user gets conflict message and refreshed candidates.
 
-### **trainer**
-
-- id
-- name
-- home_address
-- lat, lng
-- hourly_rate
-- travel_rate_km
-- notes
-- created_at
-- updated_at
-
-### **trainer_skill**
-
-- trainer_id
-- training_type_id
-
-### **trainer_rule**
-
-- trainer_id
-- rule_type
-- rule_value (JSON or structured)
-
-### **training**
-
-- id
-- training_type_id
-- address
-- lat, lng
-- start_datetime
-- end_datetime
-- status (including "canceled")
-- assigned_trainer_id
-- google_event_id
-- notes
-- created_at
-- updated_at
+No temporary hold in MVP.
 
 ---
 
-## **1️⃣5️⃣ Why this is a good MVP**
+## 8) Views and Navigation
 
-- solves the main pain (fast and safe trainer assignment)
-- does not cover unnecessary areas (roles, notifications, complex workflows)
-- remains understandable even a year later (simple model, clear statuses)
-- can be easily extended (Google Calendar, location catalog, reports)
-- Google Calendar is "just a plugin on top", not the core of the system
+### 8.1 Request list
+
+- table of requests,
+- filters by status, topic, date window,
+- quick filter "unassigned".
+
+### 8.2 Planner calendar
+
+- monthly default view,
+- optional weekly view,
+- shows assigned trainings and open requests.
+
+### 8.3 Trainer detail
+
+- topics,
+- supplied availability slots,
+- monthly offered vs delivered days,
+- fairness deviation indicator.
+
+---
+
+## 9) Non-Functional Requirements
+
+- responsive web app (desktop-first, usable on mobile),
+- internal team usage (2-3 planners),
+- low operating cost,
+- backup strategy at DB/hosting level,
+- auditable timestamps on key entities,
+- real-time update latency suitable for coordination (< a few seconds in normal operation).
+
+---
+
+## 10) Out of Scope (MVP)
+
+- temporary slot holds/reservations,
+- trainer-side self-service portal,
+- multi-company tenant model,
+- complex pricing optimization,
+- AI autonomous assignment,
+- full Google Calendar sync.
+
+---
+
+## 11) Audit and Traceability (Lightweight)
+
+For requests, trainers, and assignments, store at least:
+
+- created_at,
+- updated_at,
+- changed_by (internal user),
+- assignment_reason (short text from ranking explanation at selection time).
+
+This keeps decisions understandable without heavy audit complexity.

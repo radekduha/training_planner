@@ -1,20 +1,22 @@
 # Training Planner
 
-Internal web app for a single owner to plan trainings and assign trainers fast and safely.
-Focus: clear workflow, predictable rules, and minimal manual checks.
+Internal web app for a small planning team (up to 3 internal users) to assign trainers to training requests quickly and safely.
+Focus: availability-first workflow, predictable rules, and fair trainer utilization.
 
 ## Goals
-- Find a usable trainer in 2 minutes or less.
-- Provide a clear "why this trainer" explanation.
-- Keep the workflow simple and low-stress.
+- Find a usable trainer+slot in 2 minutes or less.
+- Provide clear "why this trainer and slot" explanation.
+- Keep monthly trainer utilization proportionally fair to offered capacity.
+- Keep planner collaboration low-friction with real-time updates.
 
 ## Non-goals (MVP)
-- Multi-user roles and permissions.
-- Trainer notifications or auto-confirmations.
-- Complex pricing models.
+- Temporary slot hold/reservation flow.
+- Trainer-side self-service portal.
+- Complex pricing optimization.
 
 ## Documentation
 - PRD: `PRD.md`
+- Implementation plan: `docs/implementation-plan-availability-first.md`
 - MVP scope: `docs/mvp-scope.md`
 - User stories: `docs/user-stories.md`
 - Glossary: `docs/glossary.md`
@@ -46,14 +48,11 @@ Run the app:
 
 Open `http://127.0.0.1:5173/`.
 
-MVP note:
-- Matching needs lat/lng on trainings and trainers. Geocoding uses Nominatim; you can still enter coordinates manually.
-
 Login:
-- Visit `http://127.0.0.1:5173/login/` and use the admin credentials from `.env`.
+- Visit `http://127.0.0.1:5173/login/` and use internal credentials from `.env`.
 
 ## Repo structure
-- `backend/` - Express + Prisma backend (JSON APIs, matching, geocoding).
+- `backend/` - Express + Prisma backend (JSON APIs, matching, realtime events).
 - `app/` - Legacy Django backend (kept for reference during migration).
 - `docs/` - Product, architecture, and engineering docs.
 - `frontend/` - React SPA (Vite build).

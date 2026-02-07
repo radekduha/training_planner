@@ -1,6 +1,16 @@
 import { requestJson } from "./client.js";
 
-export const fetchTrainers = () => requestJson("/trainers/");
+export const fetchTrainers = (params = {}) => {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") {
+      return;
+    }
+    search.set(key, value);
+  });
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return requestJson(`/trainers/${suffix}`);
+};
 
 export const fetchTrainer = (id) => requestJson(`/trainers/${id}/`);
 
